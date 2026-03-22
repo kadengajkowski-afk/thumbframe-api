@@ -401,8 +401,8 @@ app.post('/checkout', async(req,res)=>{
       mode:'subscription',
       ...(email && email.trim() ? {customer_email: email.trim()} : {}),
       line_items:[{price:prices[plan]||prices.pro,quantity:1}],
-      success_url:`${process.env.SITE_URL||'http://localhost:3000'}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:`${process.env.SITE_URL||'http://localhost:3000'}/pricing`,
+      success_url: `https://thumbframe.com/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:  `https://thumbframe.com/pricing`,
     });
     res.json({url:session.url});
   }catch(err){
