@@ -442,4 +442,11 @@ app.get('/success',(req,res)=>res.send(`
   </body></html>
 `));
 
+// Keep Railway awake
+setInterval(()=>{
+  fetch(`https://thumbframe-api-production.up.railway.app/`)
+    .then(()=>console.log('Keep-alive ping sent'))
+    .catch(()=>console.log('Keep-alive ping failed'));
+}, 14 * 60 * 1000);
+
 app.listen(PORT,()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
