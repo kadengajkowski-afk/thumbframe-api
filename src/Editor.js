@@ -464,135 +464,6 @@ function renderShapeSVG(shape,fillColor,strokeColor,width,height){
 
 let idCounter=1;
 function newId(){return idCounter++;}
-function applyHealToContext(ctx, x, y, r, width, height){
-  const clamp = v=>Math.min(255,Math.max(0,Math.round(v)));
-  const PATCH = Math.max(2,Math.round(r*0.25));
-  const margin = Math.round(r*2);
-  const wx  = Math.max(0,Math.round(x-r-margin));
-  const wy  = Math.max(0,Math.round(y-r-margin));
-  const ww  = Math.min(width-wx,  (r+margin)*2+1);
-  const wh  = Math.min(height-wy, (r+margin)*2+1);
-  if(ww<PATCH*4||wh<PATCH*4) return;
-  const lx=x-wx, ly=y-wy;
-  const SI=(px,py)=>(py*ww+px)*4;
-  const wid=ctx.getImageData(wx,wy,ww,wh);
-  const src=new Uint8ClampedArray(wid.data);
-  const out=new Uint8ClampedArray(wid.data);
-  const mask=new Uint8Array(ww*wh);
-  for(let i=0;i<ww;i++) for(let j=0;j<wh;j++){
-    const d=Math.sqrt((i-lx)**2+(j-ly)**2);
-    const p=SI(i,j);
-    if(d<=r||src[p+3]<128) mask[j*ww+i]=1;
-  }
-  const sources=[];
-  for(let i=PATCH;i<ww-PATCH;i+=2) for(let j=PATCH;j<wh-PATCH;j+=2){
-    if(!mask[j*ww+i]&&src[SI(i,j)+3]>=200) sources.push([i,j]);
-  }
-  if(sources.length<4) return;
-  function patchDist(ax,ay,bx,by){
-    let sum=0,cnt=0;
-    for(let di=-PATCH;di<=PATCH;di+=2) for(let dj=-PATCH;dj<=PATCH;dj+=2){
-      const ai=ax+di,aj=ay+dj,bi=bx+di,bj=by+dj;
-      if(ai<0||ai>=ww||aj<0||aj>=wh||bi<0||bi>=ww||bj<0||bj>=wh) continue;
-      if(mask[aj*ww+ai]||mask[bj*ww+bi]) continue;
-      const a=SI(ai,aj),b=SI(bi,bj);
-      const dr=src[a]-src[b],dg=src[a+1]-src[b+1],db=src[a+2]-src[b+2];
-      sum+=dr*dr+dg*dg+db*db; cnt++;
-    }
-    return cnt>0?sum/cnt:Infinity;
-  }
-  const nnfX=new Int16Array(ww*wh);
-  const nnfY=new Int16Array(ww*wh);
-  const nnfS=new Float32Array(ww*wh).fill(Infinity);
-  for(let i=0;i<ww;i++) for(let j=0;j<wh;j++){
-    if(!mask[j*ww+i]) continue;
-    const rnd=sources[Math.floor(Math.random()*sources.length)];
-    nnfX[j*ww+i]=rnd[0];nnfY[j*ww+i]=rnd[1];
-    nnfS[j*ww+i]=patchDist(i,j,rnd[0],rnd[1]);
-  }
-  for(let iter=0;iter<3;iter++){
-    const fwd=iter%2===0;
-    const iS=fwd?PATCH:ww-PATCH-1,iE=fwd?ww-PATCH:PATCH-1,iV=fwd?1:-1;
-    const jS=fwd?PATCH:wh-PATCH-1,jE=fwd?wh-PATCH:PATCH-1,jV=fwd?1:-1;
-    for(let i=iS;i!==iE;i+=iV) for(let j=jS;j!==jE;j+=jV){
-      if(!mask[j*ww+i]) continue;
-      const ni=j*ww+i;
-      let bx=nnfX[ni],by=nnfY[ni],bs=nnfS[ni];
-      for(const [pi,pj] of [[i-iV,j],[i,j-jV]]){
-        if(pi<0||pi>=ww||pj<0||pj>=wh||!mask[pj*ww+pi]) continue;
-        const cx=nnfX[pj*ww+pi]+iV,cy=nnfY[pj*ww+pi]+jV;
-        if(cx<PATCH||cx>=ww-PATCH||cy<PATCH||cy>=wh-PATCH||mask[cy*ww+cx]) continue;
-        const sc=patchDist(i,j,cx,cy);
-        if(sc<bs){bx=cx;by=cy;bs=sc;}
-      }
-      let sr=Math.max(ww,wh)/2;
-      while(sr>=1){
-        const rx=Math.round(bx+(Math.random()*2-1)*sr);
-        const ry=Math.round(by+(Math.random()*2-1)*sr);
-        if(rx>=PATCH&&rx<ww-PATCH&&ry>=PATCH&&ry<wh-PATCH&&!mask[ry*ww+rx]){
-          const sc=patchDist(i,j,rx,ry);
-          if(sc<bs){bx=rx;by=ry;bs=sc;}
-        }
-        sr*=0.5;
-      }
-      nnfX[ni]=bx;nnfY[ni]=by;nnfS[ni]=bs;
-    }
-  }
-  for(let i=0;i<ww;i++) for(let j=0;j<wh;j++){
-    if(!mask[j*ww+i]) continue;
-    const dist=Math.sqrt((i-lx)**2+(j-ly)**2);
-    if(dist>r+1) continue;
-    const fo=Math.max(0,1-(dist/r)**1.5);
-    const str=fo;
-    if(str<=0) continue;
-    const ni=j*ww+i;
-    const sx=nnfX[ni],sy=nnfY[ni];
-    if(sx<0||sx>=ww||sy<0||sy>=wh||mask[sy*ww+sx]) continue;
-    const ss=SI(sx,sy);
-    if(src[ss+3]<200) continue;
-    const pidx=SI(i,j);
-    const alpha=src[pidx+3];
-    let wR=0,wG=0,wB=0,wT=0;
-    const kr=Math.min(2,PATCH);
-    for(let di=-kr;di<=kr;di++) for(let dj=-kr;dj<=kr;dj++){
-      const ni2=i+di,nj2=j+dj;
-      if(ni2<0||ni2>=ww||nj2<0||nj2>=wh||!mask[nj2*ww+ni2]) continue;
-      const nn2=nj2*ww+ni2;
-      const sx2=nnfX[nn2]+di,sy2=nnfY[nn2]+dj;
-      if(sx2<0||sx2>=ww||sy2<0||sy2>=wh||mask[sy2*ww+sx2]) continue;
-      const ss2=SI(sx2,sy2);
-      if(src[ss2+3]<200) continue;
-      const gw=Math.exp(-(di*di+dj*dj)/(kr*kr+0.1))/(nnfS[nn2]+0.001);
-      wR+=src[ss2]*gw;wG+=src[ss2+1]*gw;wB+=src[ss2+2]*gw;wT+=gw;
-    }
-    const fR=wT>0?wR/wT:src[ss];
-    const fG=wT>0?wG/wT:src[ss+1];
-    const fB=wT>0?wB/wT:src[ss+2];
-    if(alpha<128){
-      out[pidx+0]=clamp(fR);out[pidx+1]=clamp(fG);
-      out[pidx+2]=clamp(fB);out[pidx+3]=clamp(255*str);
-    } else {
-      const tL=0.299*src[pidx]+0.587*src[pidx+1]+0.114*src[pidx+2];
-      const sL=0.299*fR+0.587*fG+0.114*fB;
-      const lr=sL>1?Math.min(tL/sL,1.8):1;
-      out[pidx+0]=clamp(src[pidx+0]*(1-str)+fR*lr*str);
-      out[pidx+1]=clamp(src[pidx+1]*(1-str)+fG*lr*str);
-      out[pidx+2]=clamp(src[pidx+2]*(1-str)+fB*lr*str);
-      out[pidx+3]=src[pidx+3];
-    }
-  }
-  const final=new Uint8ClampedArray(out);
-  for(let i=0;i<ww;i++) for(let j=0;j<wh;j++){
-    const d=Math.sqrt((i-lx)**2+(j-ly)**2);
-    if(d<r*0.82||d>r) continue;
-    const t=(d-r*0.82)/(r*0.18);
-    const p=SI(i,j);
-    for(let c=0;c<3;c++) final[p+c]=clamp(out[p+c]*(1-t)+src[p+c]*t);
-    if(src[p+3]<128) final[p+3]=clamp(out[p+3]*(1-t));
-  }
-  ctx.putImageData(new ImageData(final,ww,wh),wx,wy);
-}
-
 function getLayerIcon(obj){if(obj.type==='background')return'▣';if(obj.type==='text')return'T';if(obj.type==='shape')return'○';if(obj.type==='svg')return'◆';if(obj.type==='image')return'▤';return'▪';}
 function getLayerColor(obj){if(obj.type==='background')return obj.bgColor||'#6C63FF';if(obj.type==='text')return obj.textColor||'#fff';if(obj.type==='shape')return obj.fillColor||'#FF4500';return'#555';}
 function getLayerName(obj){if(obj.type==='background')return'Background';if(obj.type==='text')return obj.text?.slice(0,18)||'Text';if(obj.type==='shape')return(obj.shape?.charAt(0).toUpperCase()+obj.shape?.slice(1))||'Shape';if(obj.type==='svg')return obj.label||'Element';if(obj.type==='image')return'Image';return'Layer';}
@@ -767,7 +638,6 @@ export default function Editor({onExit, user, token, apiUrl}){
   const canDrag         = activeTool==='move' || activeTool==='select' || activeTool==='shapes' || activeTool==='stickers';
   // ✅ When brush active on image — that image is ONLY shown in brush overlay, nowhere else
   const brushingImageId = activeTool==='brush'&&(selectedLayer?.type==='image'||selectedLayer?.type==='background') ? selectedId : null;
-  const brushTargetRef = useRef(null);
 
   useEffect(()=>{zoomRef.current=zoom;},[zoom]);
 
@@ -779,6 +649,7 @@ export default function Editor({onExit, user, token, apiUrl}){
     historyIndexRef.current=0;
     setHistory([[b]]);
     setHistoryIndex(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   // ✅ Window drag handlers — ONLY fire when draggingRef or resizingRef is set
@@ -848,6 +719,7 @@ export default function Editor({onExit, user, token, apiUrl}){
     };
     window.addEventListener('keydown',handler);
     return()=>window.removeEventListener('keydown',handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[selectedId,layers,clipboard,historyIndex,history,designName]);
 
   function makeBg(plat){return{id:newId(),type:'background',bgColor:'#ffffff',bgGradient:null,x:0,y:0,width:plat.preview.w,height:plat.preview.h,opacity:100,hidden:false,locked:true,blendMode:'normal',effects:defaultEffects()};}
@@ -889,7 +761,6 @@ export default function Editor({onExit, user, token, apiUrl}){
   }
 
   function updateLayer(id,updates){setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,...updates}:l);pushHistoryDebounced(nl);return nl;});}
-  function updateLayerImmediate(id,updates){setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,...updates}:l);pushHistory(nl);return nl;});}
   function updateLayerSilent(id,updates){setLayers(prev=>prev.map(l=>l.id===id?{...l,...updates}:l));}
   function updateLayerEffect(id,key,value){setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,effects:{...(l.effects||defaultEffects()),[key]:value}}:l);pushHistory(nl);return nl;});}
   function updateLayerEffectSilent(id,key,value){setLayers(prev=>prev.map(l=>l.id===id?{...l,effects:{...(l.effects||defaultEffects()),[key]:value}}:l));}
@@ -1942,10 +1813,6 @@ export default function Editor({onExit, user, token, apiUrl}){
     img.src=layer.src;
   }
 
-  function addLayerGroup(name){
-    const id=newId();
-    setGroups(prev=>[...prev,{id,name:name||'Group '+id,layerIds:[],collapsed:false}]);
-  }
 
   function alignLayer(id,dir){
     const layer=layers.find(l=>l.id===id);if(!layer||layer.type==='background')return;
@@ -4657,11 +4524,6 @@ export default function Editor({onExit, user, token, apiUrl}){
               </div>
               <div style={{display:'flex',gap:2}}>
                 {[['↑',()=>selectedId&&moveLayerUp(selectedId),'Up'],['↓',()=>selectedId&&moveLayerDown(selectedId),'Down'],['⧉',()=>selectedId&&duplicateLayer(selectedId),'Dupe'],['×',()=>selectedId&&deleteLayer(selectedId),'Del']].map(([icon,action,title])=>(<button key={icon} onClick={action} title={title} style={{padding:'2px 7px',borderRadius:4,border:`1px solid ${icon==='×'?T.danger:T.border}`,background:'transparent',color:icon==='×'?T.danger:T.muted,fontSize:11,cursor:'pointer'}}>{icon}</button>))}
-                <button onClick={()=>addLayerGroup()} title="New group"
-                  style={{padding:'2px 7px',borderRadius:4,border:`1px solid ${T.border}`,
-                    background:'transparent',color:T.muted,fontSize:11,cursor:'pointer'}}>
-                  ⊞
-                </button>
               </div>
             </div>
             <div style={{maxHeight:240,overflowY:'auto',padding:'0 6px 8px'}}>
