@@ -16,7 +16,7 @@ const { Resend } = require('resend');
 
 const app        = express();
 const PORT       = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'snapframe-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'thumbframe-secret-2024';
 
 const openai     = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -52,7 +52,7 @@ function authMiddleware(req,res,next){
 }
 
 // ── Health ─────────────────────────────────────────────────────────────────────
-app.get('/',(req,res)=>res.json({status:'SnapFrame API running',version:'3.0'}));
+app.get('/',(req,res)=>res.json({status:'ThumbFrame API running',version:'3.0'}));
 
 // ── Proxy image (CORS fix) ─────────────────────────────────────────────────────
 app.get('/proxy-image', async(req,res)=>{
@@ -100,7 +100,7 @@ app.post('/ai-command', async(req,res)=>{
     const { command, canvasState } = req.body;
     if(!command) return res.status(400).json({error:'No command'});
 
-    const system = `You are an AI assistant for SnapFrame, a YouTube thumbnail editor.
+    const system = `You are an AI assistant for ThumbFrame, a YouTube thumbnail editor.
 The user gives you a plain-English command and the current canvas state.
 Respond ONLY with valid JSON — no explanation, no markdown fences.
 If a single action is needed return the action object directly.
@@ -209,16 +209,16 @@ app.post('/auth/signup', async(req,res)=>{
     // Send welcome email
     try{
       await resend.emails.send({
-        from:    'SnapFrame <onboarding@resend.dev>',
+        from:    'ThumbFrame <onboarding@resend.dev>',
         to:      email,
-        subject: 'Welcome to SnapFrame 🎨',
+        subject: 'Welcome to ThumbFrame 🎨',
         html:    `
           <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:40px 20px">
             <h1 style="font-size:28px;font-weight:800;color:#1a1612;margin-bottom:8px">
-              Welcome to SnapFrame, ${name||email.split('@')[0]}! 🎨
+              Welcome to ThumbFrame, ${name||email.split('@')[0]}! 🎨
             </h1>
             <p style="color:#666;font-size:15px;line-height:1.6">
-              You now have access to the full SnapFrame thumbnail editor — completely free.
+              You now have access to the full ThumbFrame thumbnail editor — completely free.
             </p>
             <div style="margin:24px 0;padding:20px;background:#f5f0e8;border-radius:10px">
               <p style="margin:0;font-weight:700;color:#1a1612;margin-bottom:12px">What you can do:</p>
@@ -233,7 +233,7 @@ app.post('/auth/signup', async(req,res)=>{
             <a href="http://localhost:3000/editor"
                style="display:inline-block;padding:14px 28px;background:#c45c2e;color:#fff;
                       text-decoration:none;border-radius:8px;font-weight:700;font-size:15px">
-              Open SnapFrame →
+              Open ThumbFrame →
             </a>
             <p style="margin-top:32px;color:#999;font-size:12px">
               Built for YouTubers who care about their craft.
@@ -288,9 +288,9 @@ app.post('/auth/forgot-password', async(req,res)=>{
     resetTokens[token]={email,expires:Date.now()+3600000}; // 1 hour
     try{
       await resend.emails.send({
-        from:    'SnapFrame <onboarding@resend.dev>',
+        from:    'ThumbFrame <onboarding@resend.dev>',
         to:      email,
-        subject: 'Reset your SnapFrame password',
+        subject: 'Reset your ThumbFrame password',
         html:    `
           <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:40px 20px">
             <h1 style="font-size:24px;font-weight:800;color:#1a1612">Reset your password</h1>
@@ -438,8 +438,8 @@ app.get('/success',(req,res)=>res.send(`
   <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#f5f0e8;color:#1a1612">
     <h1 style="color:#4a7c59">✅ Payment successful!</h1>
     <p>Your Pro account is now active. Check your email for confirmation.</p>
-    <a href="/" style="color:#c45c2e;font-weight:700">← Back to SnapFrame</a>
+    <a href="/" style="color:#c45c2e;font-weight:700">← Back to ThumbFrame</a>
   </body></html>
 `));
 
-app.listen(PORT,()=>console.log(`🚀 SnapFrame API running on port ${PORT}`));
+app.listen(PORT,()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
