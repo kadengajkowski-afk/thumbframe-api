@@ -399,7 +399,7 @@ app.post('/checkout', async(req,res)=>{
     const session=await stripe.checkout.sessions.create({
       payment_method_types:['card'],
       mode:'subscription',
-      customer_email:email,
+      ...(email && email.trim() ? {customer_email: email.trim()} : {}),
       line_items:[{price:prices[plan]||prices.pro,quantity:1}],
       success_url:`${process.env.SITE_URL||'http://localhost:3000'}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:`${process.env.SITE_URL||'http://localhost:3000'}/pricing`,
