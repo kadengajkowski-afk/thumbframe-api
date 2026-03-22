@@ -1,0 +1,6 @@
+.env
+node_modules
+keys.json
+users.json
+designs.json
+.claude
