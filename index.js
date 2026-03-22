@@ -24,16 +24,12 @@ const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://thumbframe.com',
-    'https://www.thumbframe.com',
-    'https://thumbframe-website.vercel.app',
-  ],
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','x-api-key','Authorization'],
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
 }));
+
+app.options('*', cors());
 app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
