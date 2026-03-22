@@ -814,7 +814,7 @@ function AuthPage({ mode, setPage, onAuth }) {
     if (!email || !password) { setError('Email and password required'); return; }
     setLoading(true); setError('');
     try {
-      const r = await fetch(`http://localhost:5000/auth/${isSignup ? 'signup' : 'login'}`, {
+      const r = await fetch(`https://thumbframe-api-production.up.railway.app/auth/${isSignup ? 'signup' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
@@ -985,7 +985,7 @@ function Dashboard({ setPage, token, apiUrl }) {
 }
 
 // ── App ────────────────────────────────────────────────────────────────────────
-const API = 'http://localhost:5000';
+const API = 'https://thumbframe-api-production.up.railway.app';
 
 export default function App() {
   const [page,  setPage]  = useState('home');

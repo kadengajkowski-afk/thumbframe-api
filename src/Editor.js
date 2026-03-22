@@ -1011,7 +1011,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         })),
       };
 
-      const res = await fetch('http://localhost:5000/ai-command',{
+      const res = await fetch('https://thumbframe-api-production.up.railway.app/ai-command',{
         method:  'POST',
         headers: {'Content-Type':'application/json'},
         body:    JSON.stringify({ command:cmd, canvasState }),
@@ -4551,7 +4551,7 @@ export default function Editor({onExit, user, token, apiUrl}){
                 const reader=new FileReader();
                 reader.onload=async()=>{
                   try{
-                    const res=await fetch('http://localhost:5000/remove-bg',{
+                    const res=await fetch('https://thumbframe-api-production.up.railway.app/remove-bg',{
                       method:'POST',
                       headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({imageUrl:reader.result}),
@@ -4610,7 +4610,7 @@ export default function Editor({onExit, user, token, apiUrl}){
           if(!prompt.trim()){alert('Enter a prompt first');return;}
           btn.textContent='Generating...';btn.disabled=true;btn.style.opacity='0.6';
           try{
-            const res=await fetch('http://localhost:5000/ai-generate',{
+            const res=await fetch('https://thumbframe-api-production.up.railway.app/ai-generate',{
               method:'POST',
               headers:{'Content-Type':'application/json'},
               body:JSON.stringify({prompt}),
