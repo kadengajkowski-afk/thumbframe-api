@@ -643,8 +643,6 @@ export default function Editor({onExit, user, token, apiUrl}){
   const resizingRef     = useRef(null);
   const dragOffsetRef   = useRef({x:0,y:0});
   const resizeStartRef  = useRef(null);
-  const cropDraggingRef    = useRef(null);
-  const cropStartRef       = useRef(null);
   const zoomRef         = useRef(1.5);
   const layersRef       = useRef([]);
   const mountedRef = useRef(true);
@@ -742,8 +740,6 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [showAiBar,setShowAiBar]   = useState(false);
   const aiCmdInputRef              = useRef(null);
   const [maskingLayerId,setMaskingLayerId] = useState(null);
-  const [showGroups,setShowGroups]         = useState(false);
-  const [groups,setGroups]                 = useState([]);
   const [brushFlowState,setBrushFlowState]             = useState(100);
   const [brushStabilizerState,setBrushStabilizerState] = useState(0);
 

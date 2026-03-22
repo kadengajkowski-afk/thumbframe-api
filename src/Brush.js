@@ -17,8 +17,6 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   const lastPressure   = useRef(1);
   const lastTime       = useRef(Date.now());
   const lastHealPos    = useRef(null);
-  const animFrameRef   = useRef(null);
-  const mousePos       = useRef(null);
 
   useImperativeHandle(ref, () => ({
     undo() {
@@ -650,23 +648,6 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     ctx.putImageData(id,sx,sy);
   }
 
-  // ✅ PHASE 4: Custom brush tip — uses a canvas pattern
-  const customTipRef = useRef(null);
-  function applyCustomTipStamp(ctx, x, y, pressure) {
-    if (!customTipRef.current) return;
-    const r     = Math.round(brushSize*(zoom||1));
-    const alpha = (brushStrength/100)*(brushFlow/100)*pressure;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    if (brushEdge==='soft') {
-      const g = ctx.createRadialGradient(x,y,0,x,y,r);
-      g.addColorStop(0,'rgba(0,0,0,1)');
-      g.addColorStop(1,'rgba(0,0,0,0)');
-      ctx.globalCompositeOperation='destination-in';
-    }
-    ctx.drawImage(customTipRef.current, x-r, y-r, r*2, r*2);
-    ctx.restore();
-  }
 
   function paintStamp(ctx, x, y, fromX, fromY, pressure) {
     if (brushType==='blur')     applyBlurStamp(ctx,x,y,pressure);
