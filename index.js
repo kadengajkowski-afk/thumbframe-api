@@ -387,6 +387,10 @@ app.delete('/designs/:id', authMiddleware,(req,res)=>{
 // ── Stripe checkout ────────────────────────────────────────────────────────────
 app.post('/checkout', async(req,res)=>{
   try{
+    console.log('Checkout request received:', req.body);
+    console.log('Stripe key exists:', !!process.env.STRIPE_SECRET_KEY);
+    console.log('Stripe key starts with:', process.env.STRIPE_SECRET_KEY?.substring(0,7));
+    console.log('Pro price ID:', process.env.STRIPE_PRO_PRICE_ID);
     const {plan='pro',email}=req.body;
     const prices={
       starter:process.env.STRIPE_STARTER_PRICE_ID,
@@ -402,8 +406,8 @@ app.post('/checkout', async(req,res)=>{
     });
     res.json({url:session.url});
   }catch(err){
-    console.error('Checkout error:',err);
-    res.status(500).json({error:'Checkout failed'});
+    console.error('Checkout error full:', err.message, err.type, err.code);
+    res.status(500).json({error:`Checkout failed: ${err.message}`});
   }
 });
 
