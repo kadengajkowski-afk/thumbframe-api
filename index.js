@@ -211,7 +211,7 @@ app.post('/auth/signup', async(req,res)=>{
     // Send welcome email
     try{
       await resend.emails.send({
-        from:    'ThumbFrame <onboarding@resend.dev>',
+        from:    'ThumbFrame <hello@thumbframe.com>',
         to:      email,
         subject: 'Welcome to ThumbFrame 🎨',
         html:    `
@@ -290,7 +290,7 @@ app.post('/auth/forgot-password', async(req,res)=>{
     resetTokens[token]={email,expires:Date.now()+3600000}; // 1 hour
     try{
       await resend.emails.send({
-        from:    'ThumbFrame <onboarding@resend.dev>',
+        from:    'ThumbFrame <hello@thumbframe.com>',
         to:      email,
         subject: 'Reset your ThumbFrame password',
         html:    `
