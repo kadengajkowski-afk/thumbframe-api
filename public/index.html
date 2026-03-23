@@ -38,9 +38,30 @@
 
   /* Landing Page Fixes */
   @media (max-width: 768px) {
-    nav { height: auto !important; padding: calc(var(--safe-top) + 10px) 15px 10px !important; }
-    .desktop-only { display: none !important; }
+    /* Hide everything that isn't essential */
+    .desktop-only, .desktop-nav-links {
+      display: none !important;
+    }
+
+    nav {
+      justify-content: space-between !important;
+      padding: 10px 15px !important;
+      height: 60px !important;
+    }
+
     .hero-grid { grid-template-columns: 1fr !important; text-align: center; padding: 20px !important; }
+
+    /* Fix the hero text size */
+    h1 {
+      font-size: 32px !important;
+      line-height: 1.1 !important;
+    }
+
+    /* Make the 'Start for free' button full width on phone */
+    .hero-text-container button {
+      width: 100% !important;
+      margin-bottom: 10px;
+    }
   }
 
   /* Editor Mobile UX: The "Smart" Layout */

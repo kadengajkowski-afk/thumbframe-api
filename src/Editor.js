@@ -2509,7 +2509,7 @@ export default function Editor({onExit, user, token, apiUrl}){
   if(window.innerWidth < 768) return(
     <div className="mobile-editor-container" style={{background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       {/* 1. Top Bar */}
-      <div style={{height:50,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',borderBottom:`1px solid ${T.border}`,background:T.panel}}>
+      <div style={{height:44,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',borderBottom:`1px solid ${T.border}`,background:T.panel}}>
         <button onClick={()=>onExit&&onExit()} style={{color:T.text,background:'none',border:'none',fontSize:18,cursor:'pointer'}}>←</button>
         <div style={{color:T.text,fontWeight:'bold',fontSize:14}}>{designName}</div>
         <button onClick={()=>setShowDownload(true)} style={{background:T.accent,color:'#fff',border:'none',borderRadius:4,padding:'5px 12px',fontWeight:'700',cursor:'pointer'}}>Save</button>
