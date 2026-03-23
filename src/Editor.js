@@ -2506,6 +2506,62 @@ export default function Editor({onExit, user, token, apiUrl}){
     return null;
   });
 
+  if(window.innerWidth < 768) return(
+    <div className="mobile-editor-container" style={{background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+      {/* 1. Top Bar */}
+      <div style={{height:50,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',borderBottom:`1px solid ${T.border}`,background:T.panel}}>
+        <button onClick={()=>onExit&&onExit()} style={{color:T.text,background:'none',border:'none',fontSize:18,cursor:'pointer'}}>←</button>
+        <div style={{color:T.text,fontWeight:'bold',fontSize:14}}>{designName}</div>
+        <button onClick={()=>setShowDownload(true)} style={{background:T.accent,color:'#fff',border:'none',borderRadius:4,padding:'5px 12px',fontWeight:'700',cursor:'pointer'}}>Save</button>
+      </div>
+      {/* 2. Canvas Viewport */}
+      <div className="canvas-viewport">
+        <div ref={canvasRef} style={{transform:`scale(${zoom})`,transformOrigin:'center center',touchAction:'none',position:'relative',width:p.preview.w,height:p.preview.h,overflow:'hidden',borderRadius:4,boxShadow:'0 8px 40px rgba(0,0,0,0.8)'}}>
+          {layers.map(obj=>{
+            if(obj.hidden) return null;
+            return renderLayerElement(obj);
+          })}
+        </div>
+      </div>
+      {/* 3. Bottom Sheet */}
+      <div className="mobile-bottom-sheet">
+        <div className="mobile-toolbar-scroll">
+          {['select','text','shapes','brush','effects'].map(tool=>(
+            <button key={tool} className="mobile-tool-btn"
+              style={{background:activeTool===tool?T.accent:'#2a2a2a',cursor:'pointer'}}
+              onClick={()=>setActiveTool(tool)}>
+              {tool.charAt(0).toUpperCase()+tool.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div style={{padding:15}}>
+          {selectedLayer?(
+            <div style={{color:T.text}}>
+              <div style={{marginBottom:10,fontSize:13}}>Opacity: {selectedLayer.opacity||100}%</div>
+              <input type="range" min="0" max="100" value={selectedLayer.opacity||100}
+                onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
+                onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}
+                style={{width:'100%'}}/>
+            </div>
+          ):(
+            <div style={{color:T.muted,textAlign:'center',fontSize:13}}>Tap an element to edit</div>
+          )}
+        </div>
+      </div>
+      {/* Download modal (shared) */}
+      {showDownload&&(
+        <div style={{position:'fixed',inset:0,zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)'}} onClick={e=>{if(e.target===e.currentTarget)setShowDownload(false);}}>
+          <div style={{background:T.panel,borderRadius:12,padding:24,width:280,border:`1px solid ${T.border}`}}>
+            <div style={{fontWeight:'700',marginBottom:16,color:T.text}}>Download</div>
+            <button onClick={()=>exportCanvas('png',false)} style={{width:'100%',padding:12,marginBottom:8,borderRadius:8,border:`1px solid ${T.border}`,background:T.input,color:T.text,cursor:'pointer',fontWeight:'600'}}>PNG</button>
+            <button onClick={()=>exportCanvas('jpg',false)} style={{width:'100%',padding:12,marginBottom:8,borderRadius:8,border:`1px solid ${T.border}`,background:T.input,color:T.text,cursor:'pointer',fontWeight:'600'}}>JPG</button>
+            <button onClick={()=>setShowDownload(false)} style={{width:'100%',padding:10,borderRadius:8,border:`1px solid ${T.border}`,background:'transparent',color:T.muted,cursor:'pointer'}}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return(
     <div className="editor-root" style={{display:'flex',flexDirection:'column',height:'100vh',background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',overflow:'hidden'}}>
 
