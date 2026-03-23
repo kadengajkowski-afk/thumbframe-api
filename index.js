@@ -455,4 +455,9 @@ setInterval(()=>{
     .catch(()=>console.log('Keep-alive ping failed'));
 }, 14 * 60 * 1000);
 
+app.post('/api/analyze-face', (req, res) => {
+  // Mock face analysis — returns a single detected face with a score
+  res.json({ faces: [{ x: 100, y: 50, w: 120, h: 120, score: 92 }] });
+});
+
 app.listen(PORT,()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
