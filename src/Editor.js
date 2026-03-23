@@ -526,6 +526,19 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [layers,setLayersRaw]              = useState([]);
   const [selectedId,setSelectedId]         = useState(null);
   const [zoom,setZoom]                     = useState(1.5);
+  // Auto-scale hook for mobile
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        const targetWidth = window.innerWidth - 30; // Margin
+        const scale = targetWidth / PLATFORMS[platform].preview.w;
+        setZoom(scale);
+      } else { setZoom(1.5); }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, [platform]);
   const [showGrid,setShowGrid]             = useState(false);
   const [showRuler,setShowRuler]           = useState(false);
   const [showSafeZones,setShowSafeZones]   = useState(false);
@@ -2829,7 +2842,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
       </div>
 
-      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+      <div style={{display:'flex',flex:1,overflow:'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
 
         {/* Left sidebar */}
         <div style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:'flex',flexDirection:'column',overflowY:'auto',flexShrink:0}}>
@@ -3001,21 +3014,11 @@ export default function Editor({onExit, user, token, apiUrl}){
                   if(activeTool==='brush') return;
                   setSelectedId(null);
                 }}
-                onTouchStart={(e) => {
-                  const t = e.touches[0];
-                  const el = canvasRef.current;
-                  const rect = el.getBoundingClientRect();
-                  const x = (t.clientX - rect.left) / zoom;
-                  const y = (t.clientY - rect.top) / zoom;
+                onPointerDown={(e) => {
+                  if (e.target !== canvasRef.current) return;
                   setSelectedId(null);
                 }}
-                onTouchMove={(e) => {
-                  if (e.cancelable) e.preventDefault();
-                }}
-                onTouchEnd={(e) => {
-                  if (e.cancelable) e.preventDefault();
-                }}
-                style={{width:p.preview.w,height:p.preview.h,position:'relative',touchAction:'none',overflow:'hidden',borderRadius:4,boxShadow:'0 8px 40px rgba(0,0,0,0.8)',flexShrink:0,cursor:activeTool==='brush'?'crosshair':
+                style={{width:p.preview.w,height:p.preview.h,position:'relative',touchAction:'none',userSelect:'none',WebkitUserSelect:'none',overflow:'hidden',borderRadius:4,boxShadow:'0 8px 40px rgba(0,0,0,0.8)',flexShrink:0,cursor:activeTool==='brush'?'crosshair':
                        activeTool==='rimlight'?(rimPickingColor?'crosshair':'crosshair'):
                        'default'}}>
 
