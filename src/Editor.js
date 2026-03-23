@@ -637,6 +637,22 @@ export default function Editor({onExit, user, token, apiUrl}){
   }
 
   const p  = PLATFORMS[platform];
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        const targetWidth = window.innerWidth - 40;
+        const scale = targetWidth / p.preview.w;
+        setZoom(scale);
+      } else {
+        setZoom(1.5);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Run on mount
+    return () => window.removeEventListener('resize', handleResize);
+  }, [p.preview.w]);
+
   const T  = {
     bg:darkMode?'#0f0f0f':'#f2f2f2',panel:darkMode?'#1a1a1a':'#ffffff',
     sidebar:darkMode?'#161616':'#fafafa',input:darkMode?'#242424':'#ffffff',
