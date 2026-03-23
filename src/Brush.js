@@ -41,8 +41,8 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     const img = new Image();
     img.onload = () => {
       const z = zoom || 1;
-      canvas.width  = Math.round(layer.width  * z);
-      canvas.height = Math.round(layer.height * z);
+      canvas.width  = layer.width;
+      canvas.height = layer.height;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       historyRef.current = [ctx.getImageData(0, 0, canvas.width, canvas.height)];
