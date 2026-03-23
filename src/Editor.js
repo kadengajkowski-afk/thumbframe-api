@@ -527,6 +527,8 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [layers,setLayersRaw]              = useState([]);
   const [selectedId,setSelectedId]         = useState(null);
   const [zoom,setZoom]                     = useState(1.5);
+  const fileInputRef = useRef(null);
+  const [activeMobileTab, setActiveMobileTab] = useState('edit');
   // Auto-scale hook for mobile
   useEffect(() => {
     const handleResize = () => {
@@ -2508,12 +2510,12 @@ export default function Editor({onExit, user, token, apiUrl}){
 
   if(window.innerWidth < 768) return(
     <div className="mobile-editor-container" style={{background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
-      <input type="file" id="mobile-upload" hidden accept="image/*" onChange={handleImageUpload} />
+      <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
       {/* 1. Top Bar */}
       <div style={{height:44,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 10px',borderBottom:`1px solid ${T.border}`,background:T.panel}}>
         <button onClick={()=>onExit&&onExit()} style={{color:T.text,background:'none',border:'none',fontSize:18,cursor:'pointer'}}>←</button>
         <div style={{color:T.text,fontWeight:'bold',fontSize:14}}>{designName}</div>
-        <button onClick={()=>setShowDownload(true)} style={{background:T.accent,color:'#fff',border:'none',borderRadius:4,padding:'5px 12px',fontWeight:'700',cursor:'pointer'}}>Save</button>
+        <button onClick={()=>exportCanvas('png',false)} style={{background:T.accent,color:'#fff',border:'none',borderRadius:6,padding:'6px 14px',fontWeight:'bold',cursor:'pointer'}}>Download</button>
       </div>
       {/* 2. Canvas Viewport */}
       <div className="canvas-viewport">
@@ -2527,7 +2529,7 @@ export default function Editor({onExit, user, token, apiUrl}){
       {/* 3. Bottom Sheet */}
       <div className="mobile-bottom-sheet">
         <div className="mobile-toolbar-scroll">
-          <button className="mobile-tool-btn" style={{cursor:'pointer'}} onClick={()=>document.getElementById('mobile-upload').click()}>
+          <button className="mobile-tool-btn" style={{cursor:'pointer'}} onClick={()=>fileInputRef.current&&fileInputRef.current.click()}>
             ➕ Upload
           </button>
           {['Templates','Text','AI Tools','Layers','Analysis'].map(tool=>(
