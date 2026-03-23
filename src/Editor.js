@@ -2527,50 +2527,57 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
       </div>
       {/* 3. Bottom Sheet */}
-      <div className="mobile-bottom-sheet">
-        <div className="mobile-toolbar-scroll">
-          <button className="mobile-tool-btn" style={{cursor:'pointer'}} onClick={()=>fileInputRef.current&&fileInputRef.current.click()}>
-            ➕ Upload
-          </button>
-          {['Templates','Text','AI Tools','Layers','Analysis'].map(tool=>(
-            <button key={tool} className="mobile-tool-btn"
-              style={{background:activeTool===tool.toLowerCase()?T.accent:'#2a2a2a',cursor:'pointer'}}
-              onClick={()=>setActiveTool(tool.toLowerCase())}>
-              {tool}
-            </button>
-          ))}
+      <div className="mobile-bottom-sheet" style={{background:T.panel}}>
+        {/* Feature Tabs */}
+        <div className="mobile-toolbar-scroll" style={{borderBottom:`1px solid ${T.border}`}}>
+          <button className="mobile-tool-btn" style={{cursor:'pointer'}} onClick={()=>fileInputRef.current&&fileInputRef.current.click()}>➕ Add Photo</button>
+          <button className="mobile-tool-btn" style={{background:activeMobileTab==='text'?T.accent:'#2a2a2a',cursor:'pointer'}} onClick={()=>setActiveMobileTab('text')}>📝 Text</button>
+          <button className="mobile-tool-btn" style={{background:activeMobileTab==='ai'?T.accent:'#2a2a2a',cursor:'pointer'}} onClick={()=>setActiveMobileTab('ai')}>✨ AI Tools</button>
+          <button className="mobile-tool-btn" style={{background:activeMobileTab==='analyze'?T.accent:'#2a2a2a',cursor:'pointer'}} onClick={()=>setActiveMobileTab('analyze')}>📈 Analyze</button>
+          <button className="mobile-tool-btn" style={{background:activeMobileTab==='layers'?T.accent:'#2a2a2a',cursor:'pointer'}} onClick={()=>setActiveMobileTab('layers')}>🗂️ Layers</button>
         </div>
-        <div style={{padding:15}}>
+        {/* Dynamic Control Panel */}
+        <div style={{padding:'15px 20px',minHeight:120}}>
           {(()=>{
             const mobileActionStyle={background:'#2a2a2a',color:'#fff',border:'none',borderRadius:8,padding:'10px 8px',cursor:'pointer',fontSize:13,fontWeight:'600'};
-            if(activeTool==='ai tools') return(
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            if(activeMobileTab==='ai') return(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <button onClick={()=>setActiveTool('removebg')} style={mobileActionStyle}>✨ Remove BG</button>
                 <button onClick={()=>setActiveTool('rimlight')} style={mobileActionStyle}>☀️ Rim Light</button>
+                <button onClick={()=>setActiveTool('heal')} style={mobileActionStyle}>🪄 AI Remove</button>
                 <button onClick={()=>setActiveTool('aigenerate')} style={mobileActionStyle}>🎨 AI Fill</button>
               </div>
             );
-            if(activeTool==='analysis') return(
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            if(activeMobileTab==='analyze') return(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <button onClick={()=>setActiveTool('ctr')} style={mobileActionStyle}>📈 CTR Score</button>
                 <button onClick={()=>setActiveTool('face')} style={mobileActionStyle}>👤 Face Score</button>
-                <button onClick={()=>setActiveTool('variants')} style={mobileActionStyle}>🎭 A/B Test</button>
+                <button onClick={()=>setActiveTool('heatmap')} style={mobileActionStyle}>🌡️ Heatmap</button>
+              </div>
+            );
+            if(activeMobileTab==='layers') return(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {[...layers].reverse().map(l=>(
+                  <div key={l.id} onClick={()=>setSelectedId(l.id)} style={{padding:10,background:selectedId===l.id?T.accent:T.bg,borderRadius:8,color:'#fff',display:'flex',justifyContent:'space-between',cursor:'pointer'}}>
+                    <span style={{fontSize:13}}>{l.type.toUpperCase()}: {l.text||'Image'}</span>
+                    <span onClick={e=>{e.stopPropagation();deleteLayer(l.id);}}>🗑️</span>
+                  </div>
+                ))}
               </div>
             );
             if(selectedId) return(
-              <div>
-                <div style={{display:'flex',justifyContent:'space-between',color:T.text,marginBottom:10,fontSize:13}}>
-                  <span>Editing {selectedLayer?.type}</span>
-                  <button onClick={()=>deleteLayer(selectedId)} style={{color:T.danger,background:'none',border:'none',cursor:'pointer'}}>🗑️ Delete</button>
+              <div style={{color:T.text}}>
+                <div style={{marginBottom:15,fontSize:12,opacity:0.6}}>EDITING: {selectedLayer?.type?.toUpperCase()}</div>
+                <div style={{display:'flex',gap:20,alignItems:'center',marginBottom:10}}>
+                  <span style={{fontSize:13,minWidth:60}}>Opacity</span>
+                  <input type="range" style={{flex:1}} min="0" max="100" value={selectedLayer?.opacity||100}
+                    onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
+                    onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}/>
                 </div>
-                <div style={{marginBottom:8,fontSize:12,color:T.muted}}>Opacity: {selectedLayer?.opacity||100}%</div>
-                <input type="range" min="0" max="100" value={selectedLayer?.opacity||100}
-                  onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
-                  onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}
-                  style={{width:'100%'}}/>
+                <button onClick={()=>deleteLayer(selectedId)} style={{...mobileActionStyle,background:T.danger,marginTop:8}}>🗑️ Delete</button>
               </div>
             );
-            return <div style={{color:T.muted,textAlign:'center',fontSize:13}}>Tap an element to edit</div>;
+            return <div style={{color:T.muted,textAlign:'center',fontSize:13,paddingTop:20}}>Tap an element to edit</div>;
           })()}
         </div>
       </div>
