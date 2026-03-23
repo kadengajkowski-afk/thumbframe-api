@@ -3035,6 +3035,78 @@ export default function Editor({onExit, user, token, apiUrl}){
                   if (e.target !== canvasRef.current) return;
                   setSelectedId(null);
                 }}
+                onTouchStart={(e)=>{
+                  if(e.touches.length===2){
+                    e.preventDefault();
+                    const dist=Math.hypot(
+                      e.touches[0].clientX-e.touches[1].clientX,
+                      e.touches[0].clientY-e.touches[1].clientY
+                    );
+                    canvasRef.current._pinchStart={dist,zoom};
+                    return;
+                  }
+                  e.preventDefault();
+                  const t=e.touches[0];
+                  const rect=canvasRef.current.getBoundingClientRect();
+                  const x=(t.clientX-rect.left)/zoom;
+                  const y=(t.clientY-rect.top)/zoom;
+                  const hit=[...layers].reverse().find(l=>{
+                    if(l.hidden||l.type==='background') return false;
+                    return x>=l.x&&x<=l.x+(l.width||100)&&
+                           y>=l.y&&y<=l.y+(l.height||50);
+                  });
+                  if(hit){
+                    setSelectedId(hit.id);
+                    justSelectedRef.current=true;
+                    canvasRef.current._touchDrag={
+                      id:hit.id,
+                      startX:x,startY:y,
+                      origX:hit.x,origY:hit.y,
+                    };
+                  } else {
+                    setSelectedId(null);
+                  }
+                }}
+                onTouchMove={(e)=>{
+                  if(e.touches.length===2){
+                    e.preventDefault();
+                    const dist=Math.hypot(
+                      e.touches[0].clientX-e.touches[1].clientX,
+                      e.touches[0].clientY-e.touches[1].clientY
+                    );
+                    const pinch=canvasRef.current._pinchStart;
+                    if(pinch){
+                      const newZoom=Math.min(16,Math.max(0.25,
+                        pinch.zoom*(dist/pinch.dist)
+                      ));
+                      setZoom(newZoom);
+                    }
+                    return;
+                  }
+                  e.preventDefault();
+                  const drag=canvasRef.current._touchDrag;
+                  if(!drag) return;
+                  const t=e.touches[0];
+                  const rect=canvasRef.current.getBoundingClientRect();
+                  const x=(t.clientX-rect.left)/zoom;
+                  const y=(t.clientY-rect.top)/zoom;
+                  const dx=x-drag.startX;
+                  const dy=y-drag.startY;
+                  updateLayerSilent(drag.id,{
+                    x:drag.origX+dx,
+                    y:drag.origY+dy,
+                  });
+                }}
+                onTouchEnd={(e)=>{
+                  e.preventDefault();
+                  const drag=canvasRef.current._touchDrag;
+                  if(drag){
+                    const layer=layers.find(l=>l.id===drag.id);
+                    if(layer) updateLayer(drag.id,{x:layer.x,y:layer.y});
+                    canvasRef.current._touchDrag=null;
+                  }
+                  canvasRef.current._pinchStart=null;
+                }}
                 style={{width:p.preview.w,height:p.preview.h,position:'relative',touchAction:'none',userSelect:'none',WebkitUserSelect:'none',overflow:'hidden',borderRadius:4,boxShadow:'0 8px 40px rgba(0,0,0,0.8)',flexShrink:0,cursor:activeTool==='brush'?'crosshair':
                        activeTool==='rimlight'?(rimPickingColor?'crosshair':'crosshair'):
                        'default'}}>
