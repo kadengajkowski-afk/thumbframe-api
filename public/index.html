@@ -15,10 +15,6 @@
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="ThumbFrame">
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png">
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.
@@ -37,54 +33,45 @@
       gtag('config', 'G-T7ZLMB1Q65');
     </script>
     <style>
-  :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+  /* 1. Global Reset */
+  body { margin: 0; padding: 0; overflow-x: hidden; background: #f5f0e8; }
 
-  /* Prevent ANY scrolling on the whole site for mobile */
-  html, body {
-    margin: 0; padding: 0;
-    width: 100vw; height: 100vh;
-    overflow: hidden;
-    background: #000;
-    position: fixed; /* Hard-lock the background */
-  }
-
-  /* Force the Landing Page Header to stay clean */
+  /* 2. Fix the Landing Page Header */
   @media (max-width: 768px) {
-    .desktop-nav-links, .desktop-only { display: none !important; }
-    nav { height: 60px !important; padding: var(--safe-top) 15px 0 !important; }
-    .hero-grid { grid-template-columns: 1fr !important; padding: 20px !important; text-align: center; }
+    /* Hide the overlapping horizontal links */
+    .desktop-nav-links { display: none !important; }
+
+    nav { height: 60px !important; padding-top: env(safe-area-inset-top) !important; }
+
+    .hero-grid {
+      grid-template-columns: 1fr !important;
+      padding-top: 40px !important;
+      text-align: center;
+    }
   }
 
-  /* The Editor Viewport - Absolute Center */
-  .mobile-canvas-container {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #111;
-    touch-action: none;
-    padding-bottom: 250px; /* Space for the bottom tools */
-  }
+  /* 3. Fix the Editor (The "Invisible Photo" Bug) */
+  @media (max-width: 768px) {
+    .editor-main-layout { flex-direction: column !important; height: 100vh !important; }
 
-  .canvas-viewport {
-    flex: 1;
-    width: 100vw;
-    background: #111;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    overflow: hidden;
-  }
+    /* Force canvas to the top */
+    .canvas-area {
+      order: -1 !important;
+      flex: 1 !important;
+      background: #000 !important;
+      min-height: 50vh !important;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+    }
 
-  .youtube-canvas {
-    width: 100% !important;
-    aspect-ratio: 16 / 9;
-    background: #fff;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.1);
+    /* Make the tools scrollable at the bottom */
+    .sidebar-left, .sidebar-right {
+      height: 40vh !important;
+      width: 100vw !important;
+      overflow-y: auto !important;
+      background: #161616 !important;
+    }
   }
     </style>
   </head>

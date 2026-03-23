@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, memo } from 'react';
 import MemesPanel from './Memes';
 import BrushTool, { BrushOverlay } from './Brush';
 
-const API = 'https://thumbframe-api-production.up.railway.app';
-
 const PLATFORMS = {
   youtube:   { label:'YouTube',   width:1280, height:720,  preview:{ w:640, h:360 } },
   tiktok:    { label:'TikTok',    width:1080, height:1920, preview:{ w:152, h:270 } },
@@ -528,15 +526,7 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [layers,setLayersRaw]              = useState([]);
   const [selectedId,setSelectedId]         = useState(null);
-  const [zoom,setZoom]                     = useState(
-    window.innerWidth < 768
-      ? (window.innerWidth - 10) / 640
-      : 1.5
-  );
-  const fileInputRef = useRef(null);
-  const [activeMobileTab, setActiveMobileTab] = useState('edit');
-  const [analysis, setAnalysis] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [zoom,setZoom]                     = useState(1.5);
   // Auto-scale hook for mobile
   useEffect(() => {
     const handleResize = () => {
@@ -1882,11 +1872,9 @@ export default function Editor({onExit, user, token, apiUrl}){
       const url=URL.createObjectURL(file);
       const img=new Image();
       img.onload=()=>{
-        const maxW=p.preview.w,maxH=p.preview.h;
-        const ratio=img.naturalWidth/img.naturalHeight;
-        let w=maxW,h=w/ratio;
-        if(h>maxH){h=maxH;w=h*ratio;}
-        addLayer({type:'image',src:url,width:Math.round(w),height:Math.round(h),x:Math.round((maxW-w)/2),y:Math.round((maxH-h)/2),cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0});
+        const cW=p.preview.w,cH=p.preview.h,ia=img.width/img.height,ca=cW/cH;
+        let w,h;if(ia>ca){h=cH;w=h*ia;}else{w=cW;h=w/ia;}
+        addLayer({type:'image',src:url,width:Math.round(w),height:Math.round(h),x:Math.round((cW-w)/2),y:Math.round((cH-h)/2),cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0});
       };
       img.src=url;
     });
@@ -1969,18 +1957,6 @@ export default function Editor({onExit, user, token, apiUrl}){
     setLayers(nl);pushHistory(nl);setLayerDragId(null);setLayerDragOver(null);
   }
   function onLayerDragEnd(){setLayerDragId(null);setLayerDragOver(null);}
-
-  async function handleFaceScore(){
-    setIsAnalyzing(true);
-    try {
-      const res = await fetch(`${API}/api/analyze-face`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
-      const data = await res.json();
-      setAnalysis(data);
-    } catch(e) {
-      console.error('Face analysis failed', e);
-    }
-    setIsAnalyzing(false);
-  }
 
   async function exportCanvas(format='png', transparent=false){
     // ✅ Free = 640×360 preview res, Pro = full resolution
@@ -2530,99 +2506,6 @@ export default function Editor({onExit, user, token, apiUrl}){
     return null;
   });
 
-  const mobileBtnStyle = {flex:'0 0 auto',background:'#333',color:'#fff',border:'none',padding:'10px 18px',borderRadius:10,fontSize:14,fontWeight:'600'};
-
-  if(window.innerWidth < 768) return (
-    <div style={{height:'100vh',display:'flex',flexDirection:'column',background:'#000'}}>
-
-      {/* 1. Header with Export */}
-      <div style={{height:50,padding:'0 15px',display:'flex',alignItems:'center',justifyContent:'space-between',borderBottom:'1px solid #333'}}>
-        <button onClick={()=>window.history.back()} style={{color:'#fff',background:'none',border:'none',fontSize:20}}>✕</button>
-        <button
-          onClick={()=>exportCanvas()}
-          style={{background:'#fff',color:'#000',border:'none',padding:'6px 15px',borderRadius:20,fontWeight:'bold'}}
-        >
-          Download
-        </button>
-      </div>
-
-      {/* 2. The 16:9 Workspace */}
-      <div className="mobile-canvas-container" onPointerDown={()=>setSelectedId(null)}>
-        <div
-          ref={canvasRef}
-          style={{
-            width:340,
-            height:191,
-            background:'#000',
-            position:'relative',
-            overflow:'hidden',
-            boxShadow:'0 0 20px rgba(0,0,0,0.8)'
-          }}
-        >
-          {layers.map(l=>{
-            if(l.hidden) return null;
-            return renderLayerElement(l);
-          })}
-          {/* Face Analysis Markers */}
-          {analysis?.faces?.map((face,i)=>(
-            <div key={i} className="face-marker" style={{left:face.x,top:face.y,width:face.w,height:face.h}}>
-              <div className="face-score-badge">{face.score}</div>
-            </div>
-          ))}
-          {/* Safe-Zone Overlay */}
-          <div style={{position:'absolute',bottom:8,right:8,background:'rgba(0,0,0,0.8)',color:'#fff',padding:'2px 4px',borderRadius:2,fontSize:10}}>10:00</div>
-        </div>
-      </div>
-
-      {/* 3. Bottom Tools */}
-      <div style={{
-        position:'fixed',bottom:0,left:0,width:'100%',
-        background:'#161616',borderTop:'1px solid #333',
-        padding:'15px 15px calc(15px + env(safe-area-inset-bottom))'
-      }}>
-        <div style={{display:'flex',overflowX:'auto',gap:10,marginBottom:15}}>
-          <button onClick={()=>fileInputRef.current&&fileInputRef.current.click()} style={mobileBtnStyle}>➕ Photo</button>
-          <button onClick={()=>addLayer({type:'text',text:'Text',x:50,y:50,fontSize:48,fontFamily:'Impact',color:'#ffffff',fontWeight:'900'})} style={mobileBtnStyle}>📝 Text</button>
-          <button onClick={()=>setActiveMobileTab('ai')} style={mobileBtnStyle}>✨ AI</button>
-          <button onClick={()=>setActiveMobileTab('analyze')} style={mobileBtnStyle}>📈 Score</button>
-        </div>
-
-        {/* Contextual Edit Area */}
-        <div style={{minHeight:80}}>
-          {selectedId ? (
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              {selectedLayer?.type==='image' && (
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,width:'100%'}}>
-                  <button
-                    onClick={()=>updateLayer(selectedId,{x:0,y:0,width:1280,height:720})}
-                    style={{background:'#4f46e5',color:'#fff',border:'none',padding:'12px',borderRadius:10,fontWeight:'bold',fontSize:12}}
-                  >
-                    🖼️ Fill White Box
-                  </button>
-                  <button onClick={()=>setActiveTool('removebg')} style={{background:'#333',color:'#fff',border:'none',padding:'12px',borderRadius:10,fontWeight:'bold',fontSize:12}}>✨ Remove BG</button>
-                </div>
-              )}
-              <div style={{display:'flex',alignItems:'center',gap:15}}>
-                <span style={{color:'#666',fontSize:12}}>OPACITY</span>
-                <input
-                  type="range" style={{flex:1}}
-                  value={selectedLayer?.opacity||100}
-                  onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
-                  onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}
-                />
-                <button onClick={()=>deleteLayer(selectedId)} style={{color:'#ef4444',background:'none',border:'none'}}>🗑️</button>
-              </div>
-            </div>
-          ) : (
-            <div style={{color:'#555',textAlign:'center'}}>Tap an element to edit</div>
-          )}
-        </div>
-      </div>
-
-      <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
-    </div>
-  );
-
   return(
     <div className="editor-root" style={{display:'flex',flexDirection:'column',height:'100vh',background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',overflow:'hidden'}}>
 
@@ -2976,10 +2859,10 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
       </div>
 
-      <div className="editor-main-layout" style={{display:'flex',flex:1,overflow:'hidden',flexDirection:'row'}}>
+      <div className="editor-main-layout" style={{display:'flex',flex:1,overflow:'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
 
         {/* Left sidebar */}
-        <div className="sidebar-left" style={{width:150,height:'100%',background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:'flex',flexDirection:'column',overflowX:'visible',overflowY:'auto',flexShrink:0,gap:2,zIndex:10}}>
+        <div className="sidebar-left" style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:window.innerWidth<768&&!mobileToolsOpen?'none':'flex',flexDirection:'column',overflowY:'auto',flexShrink:0,position:window.innerWidth<768?'fixed':'relative',zIndex:window.innerWidth<768?1000:'auto',height:window.innerWidth<768?'100%':'auto',width:window.innerWidth<768?'100%':150}}>
           {(()=>{
             let lastGroup = null;
             return tools.map((t,i)=>{
@@ -3022,7 +2905,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
 
         {/* Canvas */}
-        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'auto',position:'relative',order:-1,minHeight:window.innerWidth<768?'50vh':'auto',width:'100%'}}>
+        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'hidden',position:'relative',order:-1,minHeight:window.innerWidth<768?'40vh':'auto',width:window.innerWidth<768?'100%':'auto'}}>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
             <div style={{transform:`scale(${zoom})`,transformOrigin:'center center',imageRendering:'high-quality'}}>
               <div ref={canvasRef}
