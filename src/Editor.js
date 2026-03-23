@@ -2506,7 +2506,7 @@ export default function Editor({onExit, user, token, apiUrl}){
   });
 
   return(
-    <div style={{display:'flex',flexDirection:'column',height:'100vh',background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',overflow:'hidden'}}>
+    <div className="editor-root" style={{display:'flex',flexDirection:'column',height:'100vh',background:T.bg,color:T.text,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',overflow:'hidden'}}>
 
       {showFileTab&&(
         <div style={{position:'fixed',inset:0,zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.7)',backdropFilter:'blur(4px)'}} onClick={e=>{if(e.target===e.currentTarget)setShowFileTab(false);}}>
@@ -2858,10 +2858,10 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
       </div>
 
-      <div style={{display:'flex',flex:1,overflow:'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
+      <div className="editor-main-layout" style={{display:'flex',flex:1,overflow:'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
 
         {/* Left sidebar */}
-        <div style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:'flex',flexDirection:'column',overflowY:'auto',flexShrink:0}}>
+        <div className="sidebar-left" style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:'flex',flexDirection:'column',overflowY:'auto',flexShrink:0}}>
           {(()=>{
             let lastGroup = null;
             return tools.map((t,i)=>{
@@ -2904,7 +2904,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
 
         {/* Canvas */}
-        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'hidden',position:'relative'}}>
+        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'hidden',position:'relative'}}>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
             <div style={{transform:`scale(${zoom})`,transformOrigin:'center center',imageRendering:'high-quality'}}>
               <div ref={canvasRef}
@@ -3193,6 +3193,7 @@ export default function Editor({onExit, user, token, apiUrl}){
 
         {/* ✅ Right sidebar — stopPropagation on pointer events so sliders never leak to canvas */}
         <div
+          className="sidebar-right"
           onPointerDown={e=>e.stopPropagation()}
           style={{width:272,background:T.sidebar,borderLeft:`1px solid ${T.border}`,display:'flex',flexDirection:'column',flexShrink:0}}
         >
