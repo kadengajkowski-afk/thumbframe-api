@@ -38,6 +38,28 @@
 
       /* Mobile Layout Fix */
       @media (max-width: 768px) {
+        body { touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+
+        /* Fix the awkward overlap in the hero section */
+        .hero-grid {
+          grid-template-columns: 1fr !important;
+          gap: 40px !important;
+          text-align: center;
+        }
+        .hero-text-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        .hero-paragraph {
+          max-width: 100% !important;
+        }
+        .hero-preview-container {
+          width: 100% !important;
+          max-width: 320px;
+          margin: 0 auto;
+        }
+
         .editor-main-layout {
           flex-direction: column !important;
           height: auto !important;
