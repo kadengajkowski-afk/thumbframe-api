@@ -2539,17 +2539,37 @@ export default function Editor({onExit, user, token, apiUrl}){
           ))}
         </div>
         <div style={{padding:15}}>
-          {selectedLayer?(
-            <div style={{color:T.text}}>
-              <div style={{marginBottom:10,fontSize:13}}>Opacity: {selectedLayer.opacity||100}%</div>
-              <input type="range" min="0" max="100" value={selectedLayer.opacity||100}
-                onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
-                onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}
-                style={{width:'100%'}}/>
-            </div>
-          ):(
-            <div style={{color:T.muted,textAlign:'center',fontSize:13}}>Tap an element to edit</div>
-          )}
+          {(()=>{
+            const mobileActionStyle={background:'#2a2a2a',color:'#fff',border:'none',borderRadius:8,padding:'10px 8px',cursor:'pointer',fontSize:13,fontWeight:'600'};
+            if(activeTool==='ai tools') return(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <button onClick={()=>setActiveTool('removebg')} style={mobileActionStyle}>✨ Remove BG</button>
+                <button onClick={()=>setActiveTool('rimlight')} style={mobileActionStyle}>☀️ Rim Light</button>
+                <button onClick={()=>setActiveTool('aigenerate')} style={mobileActionStyle}>🎨 AI Fill</button>
+              </div>
+            );
+            if(activeTool==='analysis') return(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <button onClick={()=>setActiveTool('ctr')} style={mobileActionStyle}>📈 CTR Score</button>
+                <button onClick={()=>setActiveTool('face')} style={mobileActionStyle}>👤 Face Score</button>
+                <button onClick={()=>setActiveTool('variants')} style={mobileActionStyle}>🎭 A/B Test</button>
+              </div>
+            );
+            if(selectedId) return(
+              <div>
+                <div style={{display:'flex',justifyContent:'space-between',color:T.text,marginBottom:10,fontSize:13}}>
+                  <span>Editing {selectedLayer?.type}</span>
+                  <button onClick={()=>deleteLayer(selectedId)} style={{color:T.danger,background:'none',border:'none',cursor:'pointer'}}>🗑️ Delete</button>
+                </div>
+                <div style={{marginBottom:8,fontSize:12,color:T.muted}}>Opacity: {selectedLayer?.opacity||100}%</div>
+                <input type="range" min="0" max="100" value={selectedLayer?.opacity||100}
+                  onChange={e=>updateLayerSilent(selectedId,{opacity:parseInt(e.target.value)})}
+                  onPointerUp={e=>updateLayer(selectedId,{opacity:parseInt(e.target.value)})}
+                  style={{width:'100%'}}/>
+              </div>
+            );
+            return <div style={{color:T.muted,textAlign:'center',fontSize:13}}>Tap an element to edit</div>;
+          })()}
         </div>
       </div>
       {/* Download modal (shared) */}
