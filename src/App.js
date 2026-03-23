@@ -250,6 +250,14 @@ function Nav({ page, setPage, user, onLogout }) {
 
 // ── Home ───────────────────────────────────────────────────────────────────────
 function Home({ setPage }) {
+  useEffect(() => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    if (isIOS && !isStandalone) {
+      console.log("Tip: Tap the Share icon and 'Add to Home Screen' for the full experience!");
+    }
+  }, []);
+
   const struggles = [
     { icon: '💸', title: "Canva charges you just to remove a background", desc: "Background removal is a basic feature. Canva locks it behind a $15/month subscription. ThumbFrame does it free." },
     { icon: '🤯', title: "Photoshop is built for professionals, not creators", desc: "You spend 20 minutes Googling how to do something that should take 20 seconds. ThumbFrame is built around how creators actually work." },
