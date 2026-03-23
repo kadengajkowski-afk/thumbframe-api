@@ -191,8 +191,8 @@ app.post('/remove-bg', async(req,res)=>{
     const buffer=Buffer.from(await response.arrayBuffer());
     res.json({image:`data:image/png;base64,${buffer.toString('base64')}`});
   }catch(err){
-    console.error('Remove BG error:',err.message);
-    res.status(500).json({error:'Background removal failed'});
+    console.error('Remove BG error:',err.message,err.type,err.code);
+    res.status(500).json({error:`AI tool timed out. ${err.message}`});
   }
 });
 
