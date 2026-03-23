@@ -34,6 +34,15 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   useEffect(() => {
     if (!layer?.src || !active) return;
     if (loadedSrc.current === layer.src) return;
+    // ✅ Don't reload if we just flushed — canvas already has correct pixels
+    if (loadedSrc.current && layer.src !== loadedSrc.current) {
+      // Only reload if src changed externally (not from our own flush)
+      const isSameCanvas = layer.src.length === loadedSrc.current.length;
+      if(isSameCanvas) {
+        loadedSrc.current = layer.src;
+        return;
+      }
+    }
     isReady.current = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -78,8 +87,12 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     tmp.height = layer.height;
     tmp.getContext('2d').drawImage(canvas, 0, 0, layer.width, layer.height);
     const dataUrl = tmp.toDataURL('image/png');
+    // ✅ Set loadedSrc BEFORE calling onUpdate to prevent reload loop
     loadedSrc.current = dataUrl;
-    onUpdate({ src: dataUrl });
+    // Small delay so React state update doesn't trigger reload
+    setTimeout(()=>{
+      onUpdate({ src: dataUrl });
+    }, 50);
   }
 
   function getPressure(pos) {
