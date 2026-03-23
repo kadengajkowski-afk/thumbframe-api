@@ -523,6 +523,7 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [activeTool,setActiveTool]         = useState('select');
   const [activeCategory,setActiveCategory] = useState('Gaming');
   const [darkMode,setDarkMode]             = useState(true);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [layers,setLayersRaw]              = useState([]);
   const [selectedId,setSelectedId]         = useState(null);
   const [zoom,setZoom]                     = useState(1.5);
@@ -2861,7 +2862,7 @@ export default function Editor({onExit, user, token, apiUrl}){
       <div className="editor-main-layout" style={{display:'flex',flex:1,overflow:'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
 
         {/* Left sidebar */}
-        <div className="sidebar-left" style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:'flex',flexDirection:'column',overflowY:'auto',flexShrink:0}}>
+        <div className="sidebar-left" style={{width:150,background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:window.innerWidth<768&&!mobileToolsOpen?'none':'flex',flexDirection:'column',overflowY:'auto',flexShrink:0,position:window.innerWidth<768?'fixed':'relative',zIndex:window.innerWidth<768?1000:'auto',height:window.innerWidth<768?'100%':'auto',width:window.innerWidth<768?'100%':150}}>
           {(()=>{
             let lastGroup = null;
             return tools.map((t,i)=>{
@@ -2904,7 +2905,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
 
         {/* Canvas */}
-        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'hidden',position:'relative'}}>
+        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'hidden',position:'relative',order:-1,minHeight:window.innerWidth<768?'40vh':'auto',width:window.innerWidth<768?'100%':'auto'}}>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
             <div style={{transform:`scale(${zoom})`,transformOrigin:'center center',imageRendering:'high-quality'}}>
               <div ref={canvasRef}
@@ -4607,6 +4608,28 @@ export default function Editor({onExit, user, token, apiUrl}){
 
         </div>
       </div>
+      {window.innerWidth < 768 && (
+        <button
+          onClick={() => setMobileToolsOpen(!mobileToolsOpen)}
+          style={{
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            zIndex: 2000,
+            background: '#6C63FF',
+            color: '#fff',
+            borderRadius: '50%',
+            width: 56,
+            height: 56,
+            border: 'none',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            fontSize: 22,
+            cursor: 'pointer',
+          }}
+        >
+          {mobileToolsOpen ? '✕' : '🛠️'}
+        </button>
+      )}
     </div>
   );
 }
