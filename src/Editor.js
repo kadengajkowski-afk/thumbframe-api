@@ -526,7 +526,11 @@ export default function Editor({onExit, user, token, apiUrl}){
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [layers,setLayersRaw]              = useState([]);
   const [selectedId,setSelectedId]         = useState(null);
-  const [zoom,setZoom]                     = useState(1.5);
+  const [zoom,setZoom]                     = useState(
+    window.innerWidth < 768
+      ? (window.innerWidth - 10) / 640
+      : 1.5
+  );
   const fileInputRef = useRef(null);
   const [activeMobileTab, setActiveMobileTab] = useState('edit');
   const [analysis, setAnalysis] = useState(null);
@@ -1876,9 +1880,11 @@ export default function Editor({onExit, user, token, apiUrl}){
       const url=URL.createObjectURL(file);
       const img=new Image();
       img.onload=()=>{
-        const cW=p.preview.w,cH=p.preview.h,ia=img.width/img.height,ca=cW/cH;
-        let w,h;if(ia>ca){h=cH;w=h*ia;}else{w=cW;h=w/ia;}
-        addLayer({type:'image',src:url,width:Math.round(w),height:Math.round(h),x:Math.round((cW-w)/2),y:Math.round((cH-h)/2),cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0});
+        const maxW=p.preview.w,maxH=p.preview.h;
+        const ratio=img.naturalWidth/img.naturalHeight;
+        let w=maxW,h=w/ratio;
+        if(h>maxH){h=maxH;w=h*ratio;}
+        addLayer({type:'image',src:url,width:Math.round(w),height:Math.round(h),x:Math.round((maxW-w)/2),y:Math.round((maxH-h)/2),cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0});
       };
       img.src=url;
     });
@@ -2451,7 +2457,7 @@ export default function Editor({onExit, user, token, apiUrl}){
     color:   {width:'100%',height:36,borderRadius:6,border:`1px solid ${T.border}`,cursor:'pointer',background:'none'},
     pill:    (a)=>({padding:'3px 10px',borderRadius:4,border:`1px solid ${a?T.accent:T.border}`,background:a?T.accent:'transparent',color:a?'#fff':T.text,fontSize:11,cursor:'pointer',fontWeight:a?'600':'400'}),
     iconBtn: (a)=>({padding:'5px 9px',borderRadius:6,border:`1px solid ${a?T.accent:T.border}`,background:a?T.accent:'transparent',color:a?'#fff':T.text,cursor:'pointer',fontSize:12,fontWeight:a?'600':'400'}),
-    toolBtn: (a)=>({padding:'7px 10px',borderRadius:6,border:'none',background:a?`${T.accent}18`:'transparent',color:a?T.accent:T.muted,fontSize:12,cursor:'pointer',textAlign:'left',width:'100%',fontWeight:a?'600':'400',display:'flex',alignItems:'center',gap:8,marginBottom:1}),
+    toolBtn: (a)=>({padding:'7px 10px',borderRadius:6,border:'none',background:a?`${T.accent}18`:'transparent',color:a?T.accent:T.muted,fontSize:12,cursor:'pointer',textAlign:'left',width:window.innerWidth<768?'auto':'100%',flexShrink:window.innerWidth<768?0:1,whiteSpace:'nowrap',fontWeight:a?'600':'400',display:'flex',alignItems:'center',gap:8,marginBottom:1}),
     addBtn:  {padding:10,borderRadius:7,background:T.accent,color:'#fff',border:'none',fontSize:12,cursor:'pointer',fontWeight:'600',width:'100%',marginTop:12},
     section: {padding:10,background:T.input,borderRadius:7,border:`1px solid ${T.border}`,marginTop:8},
     row:     {display:'flex',gap:6,alignItems:'center'},
@@ -2971,7 +2977,7 @@ export default function Editor({onExit, user, token, apiUrl}){
       <div className="editor-main-layout" style={{display:'flex',flex:1,overflow:window.innerWidth<768?'auto':'hidden',flexDirection:window.innerWidth<768?'column':'row'}}>
 
         {/* Left sidebar */}
-        <div className="sidebar-left" style={{width:window.innerWidth<768?'100%':150,height:'auto',background:T.sidebar,borderRight:`1px solid ${T.border}`,padding:'8px 6px',display:window.innerWidth<768?'flex':'flex',flexDirection:window.innerWidth<768?'row':'column',overflowX:window.innerWidth<768?'auto':'visible',overflowY:window.innerWidth<768?'hidden':'auto',flexShrink:0}}>
+        <div className="sidebar-left" style={{width:window.innerWidth<768?'100%':150,height:'auto',background:T.sidebar,borderRight:window.innerWidth<768?'none':`1px solid ${T.border}`,borderBottom:window.innerWidth<768?`1px solid ${T.border}`:'none',padding:'8px 6px',display:'flex',flexDirection:window.innerWidth<768?'row':'column',overflowX:window.innerWidth<768?'auto':'visible',overflowY:window.innerWidth<768?'hidden':'auto',flexShrink:0,gap:2,zIndex:10}}>
           {(()=>{
             let lastGroup = null;
             return tools.map((t,i)=>{
@@ -3014,7 +3020,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         </div>
 
         {/* Canvas */}
-        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'auto',position:'relative',order:-1,minHeight:window.innerWidth<768?'60vh':'auto',width:window.innerWidth<768?'100%':'auto'}}>
+        <div className="canvas-area" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:darkMode?'#080808':'#d0d0d0',overflow:'auto',position:'relative',order:-1,minHeight:window.innerWidth<768?'50vh':'auto',width:'100%'}}>
           <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
             <div style={{transform:`scale(${zoom})`,transformOrigin:'center center',imageRendering:'high-quality'}}>
               <div ref={canvasRef}
@@ -3377,7 +3383,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         <div
           className="sidebar-right"
           onPointerDown={e=>e.stopPropagation()}
-          style={{width:272,background:T.sidebar,borderLeft:`1px solid ${T.border}`,display:'flex',flexDirection:'column',flexShrink:0}}
+          style={{width:272,background:T.sidebar,borderLeft:`1px solid ${T.border}`,display:window.innerWidth<768?'none':'flex',flexDirection:'column',flexShrink:0}}
         >
           <div style={{flex:1,padding:'10px 12px',overflowY:'auto'}}>
 
