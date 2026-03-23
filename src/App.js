@@ -213,7 +213,7 @@ function Nav({ page, setPage, user, onLogout }) {
           <div style={{ flex: 1 }} />
 
           {/* Right actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {user ? (
               <>
                 <span style={{ fontSize: 13, color: C.text2, fontWeight: '500' }}>{user.name}</span>
