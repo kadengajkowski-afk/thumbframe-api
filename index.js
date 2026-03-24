@@ -24,17 +24,20 @@ const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
+const allowedOrigins = [
+  'https://thumbframe.com',
+  'https://www.thumbframe.com',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: 'https://thumbframe.com',
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
 }));
 
-app.options('*', cors({
-  origin: 'https://thumbframe.com',
-  credentials: true,
-}));
+app.options('*', cors());
 app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
