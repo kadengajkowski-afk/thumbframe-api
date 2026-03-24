@@ -97,7 +97,7 @@ function Sidebar({ open, onClose, setPage }) {
         <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 24, height: 24, borderRadius: 6, background: C.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 12, color: '#fff', fontWeight: '800' }}>S</span>
+              <span style={{ fontSize: 12, color: '#fff', fontWeight: '800' }}>T</span>
             </div>
             <span style={{ fontSize: 15, fontWeight: '700', color: C.text }}>ThumbFrame</span>
           </div>
@@ -165,6 +165,9 @@ function Nav({ page, setPage, user, onLogout }) {
 
   return (
     <>
+      <div className="mobile-warning-banner">
+        ⚠️ Mobile is limited. For the full experience, use Desktop.
+      </div>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} setPage={setPage} />
       <nav style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
@@ -190,13 +193,13 @@ function Nav({ page, setPage, user, onLogout }) {
           {/* Logo */}
           <div onClick={() => setPage('home')} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', flexShrink: 0 }}>
             <div style={{ width: 22, height: 22, borderRadius: 5, background: C.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>S</span>
+              <span style={{ fontSize: 11, color: '#fff', fontWeight: '800' }}>T</span>
             </div>
             <span style={{ fontSize: 15, fontWeight: '700', color: C.text, letterSpacing: '-0.2px' }}>ThumbFrame</span>
           </div>
 
           {/* Nav links */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 8 }}>
+          <div className="desktop-nav" style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 8 }}>
             {[['How it works', 'howitworks'], ['Examples', 'examples'], ['Pricing', 'pricing']].map(([label, key]) => (
               <button key={key} onClick={() => setPage(key)} style={{
                 padding: '5px 12px', borderRadius: 6, border: 'none',
@@ -639,7 +642,7 @@ function Home({ setPage }) {
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 20, height: 20, borderRadius: 5, background: C.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 10, color: '#fff', fontWeight: '800' }}>S</span>
+              <span style={{ fontSize: 10, color: '#fff', fontWeight: '800' }}>T</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: '700', color: C.text }}>ThumbFrame</span>
             <span style={{ fontSize: 13, color: C.muted, marginLeft: 4 }}>— Built for YouTubers who care about their craft.</span>
@@ -846,7 +849,7 @@ function AuthPage({ mode, setPage, onAuth }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 32 }}>
           <div style={{ width: 28, height: 28, borderRadius: 7, background: C.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 13, color: '#fff', fontWeight: '800' }}>S</span>
+            <span style={{ fontSize: 13, color: '#fff', fontWeight: '800' }}>T</span>
           </div>
           <span style={{ fontSize: 17, fontWeight: '700', color: C.text }}>ThumbFrame</span>
         </div>
