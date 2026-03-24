@@ -3,7 +3,7 @@ const express    = require('express');
 const cors       = require('cors');
 const Replicate  = require('replicate');
 const { v4: uuidv4 } = require('uuid');
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripe     = require('stripe')(stripeSecretKey);
 const fetch      = require('node-fetch');
 const FormData   = require('form-data');
@@ -27,7 +27,7 @@ const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 const allowedOrigins = [
   'https://thumbframe.com',
   'https://www.thumbframe.com',
-  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL?.trim(),
 ].filter(Boolean);
 
 app.use(cors({
@@ -402,7 +402,7 @@ app.post('/checkout', async(req,res)=>{
     console.log('[checkout] STRIPE_SECRET_KEY found:', !!stripeSecretKey);
 
     const {email}=req.body;
-    const priceId=process.env.STRIPE_PRO_PRICE_ID;
+    const priceId=process.env.STRIPE_PRO_PRICE_ID?.trim();
 
     console.log('[checkout] priceId:', priceId);
 
