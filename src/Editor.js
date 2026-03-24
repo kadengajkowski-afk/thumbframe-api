@@ -2389,6 +2389,7 @@ export default function Editor({onExit, user, token, apiUrl}){
             position:'absolute',left:obj.x,top:obj.y,zIndex,
             opacity:opacityVal,cursor,...selStyle,...blendStyle,
             overflow:'hidden',width:cropW,height:cropH,...effectsStyle,
+            pointerEvents:activeTool==='brush'&&obj.id===selectedId?'none':'auto',
             WebkitMaskImage: hasMask?`url(${obj.mask.data})`:'none',
             WebkitMaskSize: hasMask?`${cropW}px ${cropH}px`:'none',
             WebkitMaskRepeat:'no-repeat',
