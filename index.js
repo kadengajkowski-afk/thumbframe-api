@@ -24,7 +24,13 @@ const openai     = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-const supabase   = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const supabase   = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+);
+
+console.log('[INIT] Supabase admin client ready:', !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY));
+console.log('[INIT] Resend client ready:', !!process.env.RESEND_API_KEY);
 
 const allowedOrigins = [
   'https://thumbframe.com',
@@ -449,35 +455,48 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
   try{
     const sig=req.headers['stripe-signature'];
     const event=stripe.webhooks.constructEvent(req.body,sig,process.env.STRIPE_WEBHOOK_SECRET);
-    if(event.type==='checkout.session.completed'){
-      const session = event.data.object;
-      const customerEmail = session.customer_details?.email;
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const customerEmail = session.customer_details?.email;
 
-      if (customerEmail) {
-        console.log(`Webhook received: Upgrading ${customerEmail} to Pro...`);
-        const { data, error } = await supabase
+        console.log(`[STRIPE WEBHOOK] Received completion for: ${customerEmail}`);
+
+        if (!customerEmail) {
+          console.error("[ERROR] No email found in Stripe session.");
+          break;
+        }
+
+        // 1. UPSERT (The 'Force-Create' move)
+        const { data, error: dbError } = await supabase
           .from('profiles')
           .upsert(
-            {
-              email: customerEmail,
-              is_pro: true
-            },
+            { email: customerEmail, is_pro: true, updated_at: new Date() },
             { onConflict: 'email' }
           );
 
-        if (error) console.error("DATABASE ERROR:", error.message);
-        else console.log(`SUCCESS: Created/Updated ${customerEmail} to Pro.`);
-      }
+        if (dbError) {
+          console.error(`[DATABASE ERROR] Failed for ${customerEmail}:`, dbError.message);
+        } else {
+          console.log(`[SUCCESS] Database updated for ${customerEmail}.`);
 
-      const email = customerEmail || session.customer_email;
-      const apiKey=uuidv4();
-      const keys=loadKeys();
-      keys[apiKey]={email,plan:'pro',created:new Date().toISOString()};
-      saveKeys(keys);
-      // Also update user plan
-      const users=loadUsers();
-      if(users[email]){ users[email].plan='pro'; saveUsers(users); }
-      console.log(`New Pro user: ${email}`);
+          // 2. SEND SUCCESS EMAIL
+          try {
+            await resend.emails.send({
+              from: 'ThumbFrame <onboarding@resend.dev>',
+              to: customerEmail,
+              subject: 'Welcome to ThumbFrame Pro! 🚀',
+              html: '<h1>Welcome to the Pro family!</h1><p>Your AI features are now unlocked.</p>'
+            });
+            console.log(`[SUCCESS] Welcome email sent to ${customerEmail}`);
+          } catch (emailErr) {
+            console.error(`[EMAIL ERROR] Failed for ${customerEmail}:`, emailErr.message);
+          }
+        }
+        break;
+      }
+      default:
+        break;
     }
     res.json({received:true});
   }catch(err){
