@@ -637,7 +637,7 @@ export default function Editor({onExit, user, token, apiUrl}){
   const canvasFilter    = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) hue-rotate(${hue}deg)`;
   const canDrag         = activeTool==='move' || activeTool==='select' || activeTool==='shapes' || activeTool==='stickers';
   // ✅ When brush active on image — that image is ONLY shown in brush overlay, nowhere else
-  const brushingImageId = null;
+  const brushingImageId = activeTool==='brush'&&(selectedLayer?.type==='image'||selectedLayer?.type==='background') ? selectedId : null;
 
   useEffect(()=>{zoomRef.current=zoom;},[zoom]);
 
@@ -760,15 +760,7 @@ export default function Editor({onExit, user, token, apiUrl}){
     setSelectedId(id);
   }
 
-  function updateLayer(id,updates){
-    // ✅ Round coordinates to prevent sub-pixel interpolation blur
-    const safeUpdates = {...updates};
-    if(safeUpdates.x !== undefined) safeUpdates.x = Math.round(safeUpdates.x);
-    if(safeUpdates.y !== undefined) safeUpdates.y = Math.round(safeUpdates.y);
-    if(safeUpdates.width !== undefined) safeUpdates.width = Math.round(safeUpdates.width);
-    if(safeUpdates.height !== undefined) safeUpdates.height = Math.round(safeUpdates.height);
-    setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,...safeUpdates}:l);pushHistoryDebounced(nl);return nl;});
-  }
+  function updateLayer(id,updates){setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,...updates}:l);pushHistoryDebounced(nl);return nl;});}
   function updateLayerSilent(id,updates){setLayers(prev=>prev.map(l=>l.id===id?{...l,...updates}:l));}
   function updateLayerEffect(id,key,value){setLayers(prev=>{const nl=prev.map(l=>l.id===id?{...l,effects:{...(l.effects||defaultEffects()),[key]:value}}:l);pushHistory(nl);return nl;});}
   function updateLayerEffectSilent(id,key,value){setLayers(prev=>prev.map(l=>l.id===id?{...l,effects:{...(l.effects||defaultEffects()),[key]:value}}:l));}
@@ -2047,20 +2039,8 @@ export default function Editor({onExit, user, token, apiUrl}){
               }
               ctx.filter=`brightness(${obj.imgBrightness||100}%) contrast(${obj.imgContrast||100}%) saturate(${obj.imgSaturate||100}%) blur(${(obj.imgBlur||0)*Math.min(scaleX,scaleY)}px)`;
               ctx.drawImage(img,x-cl,y-ct,w,h);
-              // ✅ Draw paint overlay on top of image
-              if(obj.paintSrc){
-                const paintImg = new Image();
-                paintImg.onload = ()=>{
-                  ctx.drawImage(paintImg,x,y,w,h);
-                  ctx.restore();
-                  resolve();
-                };
-                paintImg.onerror = ()=>{ ctx.restore(); resolve(); };
-                paintImg.src = obj.paintSrc;
-              } else {
-                ctx.restore();
-                resolve();
-              }
+              ctx.restore();
+              resolve();
             }
           };
           img.onerror=()=>resolve();
@@ -2383,15 +2363,12 @@ export default function Editor({onExit, user, token, apiUrl}){
       const cropW=obj.width-(obj.cropLeft||0)-(obj.cropRight||0);
       const cropH=obj.height-(obj.cropTop||0)-(obj.cropBottom||0);
       const hasMask=obj.mask?.enabled&&obj.mask?.data;
-      const isBrushing=activeTool==='brush'&&selectedId===obj.id;
       return(
-        <div key={obj.id}
-          onMouseDown={e=>{ if(activeTool!=='brush') onLayerMouseDown(e,obj.id); }}
+        <div key={obj.id} onMouseDown={e=>onLayerMouseDown(e,obj.id)}
           style={{
             position:'absolute',left:obj.x,top:obj.y,zIndex,
             opacity:opacityVal,cursor,...selStyle,...blendStyle,
             overflow:'hidden',width:cropW,height:cropH,...effectsStyle,
-            pointerEvents:'auto',
             WebkitMaskImage: hasMask?`url(${obj.mask.data})`:'none',
             WebkitMaskSize: hasMask?`${cropW}px ${cropH}px`:'none',
             WebkitMaskRepeat:'no-repeat',
@@ -2399,43 +2376,13 @@ export default function Editor({onExit, user, token, apiUrl}){
             maskSize: hasMask?`${cropW}px ${cropH}px`:'none',
             maskRepeat:'no-repeat',
           }}>
-          {/* Base image */}
-          <img src={obj.src} alt="base" style={{
+          <img src={obj.src} alt="" style={{
             width:obj.width,height:obj.height,display:'block',
             pointerEvents:'none',
             marginLeft:-(obj.cropLeft||0),marginTop:-(obj.cropTop||0),
             transform:`scale(${obj.flipH?-1:1},${obj.flipV?-1:1})`,
             filter:`brightness(${obj.imgBrightness||100}%) contrast(${obj.imgContrast||100}%) saturate(${obj.imgSaturate||100}%) blur(${obj.imgBlur||0}px)`,
           }}/>
-          {/* Saved paint overlay — hide while actively brushing so live canvas shows through */}
-          {obj.paintSrc&&!isBrushing&&(
-            <img alt="paint" src={obj.paintSrc} style={{
-              position:'absolute',
-              top:-(obj.cropTop||0),left:-(obj.cropLeft||0),
-              width:obj.width,height:obj.height,
-              pointerEvents:'none',imageRendering:'pixelated',
-            }}/>
-          )}
-          {/* Live brush canvas — only in mobile view (desktop uses separate BrushOverlay) */}
-          {isBrushing&&window.innerWidth<768&&(
-            <BrushOverlay
-              ref={brushOverlayRef}
-              layer={{...obj,src:obj.src,width:obj.width,height:obj.height}}
-              active={true}
-              zoom={zoom}
-              brushType={brushTypeState}
-              brushSize={brushSizeState}
-              brushStrength={brushStrengthState}
-              brushEdge={brushEdgeState}
-              brushFlow={brushFlowState}
-              brushStabilizer={brushStabilizerState}
-              paintColor={brushColorState}
-              paintAlpha={brushColorAlpha}
-              onUpdate={updates=>{
-                if(updates?.paintSrc) updateLayer(obj.id,{paintSrc:updates.paintSrc});
-              }}
-            />
-          )}
           {isSelected&&renderResizeHandles(obj)}
           {isSelected&&renderCropHandles(obj)}
           <DelBtn/>
@@ -3122,22 +3069,14 @@ export default function Editor({onExit, user, token, apiUrl}){
                       paintColor={brushColorState}
                       paintAlpha={brushColorAlpha}
                       onUpdate={(updates)=>{
-                        if(!updates?.paintSrc && !updates?.src) return;
                         if(selectedLayer?.type==='background'){
-                          // Background still needs full merge
-                          if(updates.src){
-                            updateLayer(selectedId,{bgColor:'transparent',bgGradient:null,
-                              src:updates.src,type:'image',
-                              x:0,y:0,width:p.preview.w,height:p.preview.h,
-                              cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,
-                              imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0
-                            });
-                          }
+                          updateLayer(selectedId,{bgColor:'transparent',bgGradient:null,src:updates.src,type:'image',
+                            x:0,y:0,width:p.preview.w,height:p.preview.h,
+                            cropTop:0,cropBottom:0,cropLeft:0,cropRight:0,
+                            imgBrightness:100,imgContrast:100,imgSaturate:100,imgBlur:0
+                          });
                         } else {
-                          // ✅ Non-destructive — only update paintSrc overlay
-                          if(updates.paintSrc){
-                            updateLayer(selectedId,{paintSrc:updates.paintSrc});
-                          }
+                          updateLayer(selectedId,updates);
                         }
                       }}
                     />

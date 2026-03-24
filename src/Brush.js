@@ -25,50 +25,50 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
       const canvas = canvasRef.current;
       if (!canvas) return;
       historyRef.current.pop();
-      canvas.getContext('2d',{willReadFrequently:true}).putImageData(
+      canvas.getContext('2d').putImageData(
         historyRef.current[historyRef.current.length - 1], 0, 0
       );
-      // Force flush on undo even without hasStroked
-      const dataUrl = canvas.toDataURL('image/png');
-      loadedSrc.current = dataUrl;
-      setTimeout(()=>{ onUpdate({ src: dataUrl }); }, 50);
+      flush();
     },
   }));
 
   useEffect(() => {
-    if (!active) return;
+    if (!layer?.src || !active) return;
+    hasStroked.current = false;
+    if (loadedSrc.current === layer.src) return;
+    // ✅ Don't reload if we just flushed — canvas already has correct pixels
+    if (loadedSrc.current && layer.src !== loadedSrc.current) {
+      // Only reload if src changed externally (not from our own flush)
+      const isSameCanvas = layer.src.length === loadedSrc.current.length;
+      if(isSameCanvas) {
+        loadedSrc.current = layer.src;
+        return;
+      }
+    }
+    isReady.current = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    canvas.width  = layer.width;
-    canvas.height = layer.height;
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (layer.paintSrc) {
-      const paintImg = new Image();
-      paintImg.onload = () => {
-        ctx.drawImage(paintImg, 0, 0, canvas.width, canvas.height);
-        historyRef.current = [ctx.getImageData(0, 0, canvas.width, canvas.height)];
-        isReady.current = true;
-      };
-      paintImg.src = layer.paintSrc;
-    } else {
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      const z = zoom || 1;
+      canvas.width  = layer.width;
+      canvas.height = layer.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       historyRef.current = [ctx.getImageData(0, 0, canvas.width, canvas.height)];
-      isReady.current = true;
-    }
-  }, [layer?.paintSrc, layer?.width, layer?.height, active]);
+      isReady.current    = true;
+      loadedSrc.current  = layer.src;
+    };
+    img.src = layer.src;
+  }, [layer?.src, layer?.width, layer?.height, active, zoom]);
 
   function getPos(e) {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const rect   = canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top)  * scaleY,
+      x: (e.clientX - rect.left) * (canvas.width  / rect.width),
+      y: (e.clientY - rect.top)  * (canvas.height / rect.height),
       clientX: e.clientX,
       clientY: e.clientY,
     };
@@ -77,7 +77,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   function saveSnap() {
     const canvas = canvasRef.current;
     if (!canvas || !isReady.current) return;
-    const snap = canvas.getContext('2d',{willReadFrequently:true}).getImageData(0, 0, canvas.width, canvas.height);
+    const snap = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
     historyRef.current = [...historyRef.current.slice(-19), snap];
     hasStroked.current = true;
   }
@@ -86,11 +86,16 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     const canvas = canvasRef.current;
     if (!canvas || !isReady.current) return;
     if (!hasStroked.current) return;
-    const dataUrl = canvas.toDataURL('image/png');
+    const tmp = document.createElement('canvas');
+    tmp.width  = layer.width;
+    tmp.height = layer.height;
+    tmp.getContext('2d').drawImage(canvas, 0, 0, layer.width, layer.height);
+    const dataUrl = tmp.toDataURL('image/png');
+    // ✅ Set loadedSrc BEFORE calling onUpdate to prevent reload loop
     loadedSrc.current = dataUrl;
+    // Small delay so React state update doesn't trigger reload
     setTimeout(()=>{
-      // ✅ Save to paintSrc not src — original image never touched
-      onUpdate({ paintSrc: dataUrl });
+      onUpdate({ src: dataUrl });
     }, 50);
   }
 
@@ -677,7 +682,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
 
   function paintStroke(pos) {
     if (!isReady.current||!canvasRef.current) return;
-    const ctx      = canvasRef.current.getContext('2d',{willReadFrequently:true});
+    const ctx      = canvasRef.current.getContext('2d');
     const pressure = getPressure(pos);
     const stabbed  = getStabilizedPos(pos);
     const r        = Math.round(brushSize*(zoom||1));
@@ -745,7 +750,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
       lastTime.current = Date.now();
       stabPos.current = null;
       if (isReady.current && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d',{willReadFrequently:true});
+        const ctx = canvasRef.current.getContext('2d');
         applyHealStamp(ctx, pos.x, pos.y, 1.0);
       }
       return;
@@ -767,7 +772,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
         const moved = Math.sqrt(dx*dx+dy*dy);
         if (moved >= Math.max(brushSize*(zoom||1)*0.8, 20)) {
           if (isReady.current && canvasRef.current) {
-            const ctx = canvasRef.current.getContext('2d',{willReadFrequently:true});
+            const ctx = canvasRef.current.getContext('2d');
             applyHealStamp(ctx, pos.x, pos.y, getPressure(pos));
           }
           lastPos.current = pos;
@@ -792,7 +797,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
       // This prevents lag since PatchMatch only runs once per click
       if (brushType === 'heal' && isReady.current && canvasRef.current) {
         const canvas = canvasRef.current;
-        const ctx    = canvas.getContext('2d',{willReadFrequently:true});
+        const ctx    = canvas.getContext('2d');
         if (lastHealPos.current) {
           applyHealStamp(ctx, lastHealPos.current.x, lastHealPos.current.y, 1.0);
         }
@@ -807,6 +812,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
 
   return (
     <div style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%' }}>
+      <div ref={cursorRef} style={{ display:'none', position:'absolute', pointerEvents:'none', zIndex:99999 }}/>
       <canvas
         ref={canvasRef}
         onMouseDown={onMouseDown}
@@ -814,15 +820,14 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
         style={{
-          position:'absolute',
-          top:0,
-          left:0,
-          width:'100%',
-          height:'100%',
-          cursor:'crosshair',
-          display:'block',
-          pointerEvents:'auto',
-          zIndex:9999,
+          position:'absolute', top:0, left:0,
+          width: layer.width+'px',
+          height: layer.height+'px',
+          transformOrigin: 'top left',
+          transform: `scale(${zoom||1})`,
+          imageRendering: 'pixelated',
+          cursor:'none', display:'block',
+          userSelect:'none', WebkitUserSelect:'none',
         }}
       />
     </div>
