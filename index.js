@@ -3,7 +3,8 @@ const express    = require('express');
 const cors       = require('cors');
 const Replicate  = require('replicate');
 const { v4: uuidv4 } = require('uuid');
-const stripe     = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripe     = require('stripe')(stripeSecretKey);
 const fetch      = require('node-fetch');
 const FormData   = require('form-data');
 const fs         = require('fs');
@@ -395,19 +396,28 @@ app.post('/checkout', async(req,res)=>{
       body: req.body,
       origin: req.headers.origin,
     });
-    console.log('[checkout] STRIPE_SECRET_KEY found:', !!process.env.STRIPE_SECRET_KEY);
+    console.log('[checkout] STRIPE_SECRET_KEY found:', !!stripeSecretKey);
 
     const {email}=req.body;
     const priceId=process.env.STRIPE_PRO_PRICE_ID;
 
     console.log('[checkout] priceId:', priceId);
 
-    if(!process.env.STRIPE_SECRET_KEY){
+    if(!stripeSecretKey){
       throw new Error('Missing STRIPE_SECRET_KEY');
+    }
+
+    if(!stripeSecretKey.startsWith('sk_')){
+      throw new Error('Invalid STRIPE_SECRET_KEY format. Expected a secret key starting with sk_.');
     }
 
     if(!priceId){
       throw new Error('Missing STRIPE_PRO_PRICE_ID');
+    }
+
+    if(!priceId.startsWith('price_')){
+      console.error('ERROR: Invalid Price ID format in Environment Variables.');
+      throw new Error('ERROR: Invalid Price ID format in Environment Variables.');
     }
 
     const session=await stripe.checkout.sessions.create({
