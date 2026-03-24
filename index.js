@@ -24,12 +24,9 @@ const openai     = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-const supabase   = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
-);
+const supabase   = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-console.log('[INIT] Supabase admin client ready:', !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY));
+console.log('[INIT] Supabase admin client ready:', !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY);
 console.log('[INIT] Resend client ready:', !!process.env.RESEND_API_KEY);
 
 const allowedOrigins = [
@@ -460,37 +457,40 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
         const session = event.data.object;
         const customerEmail = session.customer_details?.email;
 
-        console.log(`[STRIPE WEBHOOK] Received completion for: ${customerEmail}`);
+        console.log(`[CEO LOG] 🚀 Webhook received for email: ${customerEmail}`);
 
         if (!customerEmail) {
-          console.error("[ERROR] No email found in Stripe session.");
+          console.error("[CEO ERROR] ❌ No email found in Stripe session object.");
           break;
         }
 
-        // 1. UPSERT (The 'Force-Create' move)
+        // UPSERT: This creates the row if it's missing, or updates it if it exists.
+        console.log(`[CEO LOG] 🔨 Attempting DB Upsert for ${customerEmail}...`);
         const { data, error: dbError } = await supabase
           .from('profiles')
           .upsert(
-            { email: customerEmail, is_pro: true, updated_at: new Date() },
+            { email: customerEmail, is_pro: true },
             { onConflict: 'email' }
           );
 
         if (dbError) {
-          console.error(`[DATABASE ERROR] Failed for ${customerEmail}:`, dbError.message);
+          console.error(`[CEO ERROR] ❌ Supabase rejected the upsert: ${dbError.message}`);
+          console.error(`[CEO ERROR] Hint: Check if RLS is blocking the Service Key or if the email column is unique.`);
         } else {
-          console.log(`[SUCCESS] Database updated for ${customerEmail}.`);
+          console.log(`[CEO LOG] ✅ Database successfully updated for ${customerEmail}.`);
 
-          // 2. SEND SUCCESS EMAIL
+          // EMAIL TRIGGER
           try {
+            console.log(`[CEO LOG] 📧 Attempting to send Resend email to ${customerEmail}...`);
             await resend.emails.send({
               from: 'ThumbFrame <onboarding@resend.dev>',
               to: customerEmail,
               subject: 'Welcome to ThumbFrame Pro! 🚀',
-              html: '<h1>Welcome to the Pro family!</h1><p>Your AI features are now unlocked.</p>'
+              html: '<h1>Welcome to Pro!</h1><p>Your features are unlocked.</p>'
             });
-            console.log(`[SUCCESS] Welcome email sent to ${customerEmail}`);
+            console.log(`[CEO LOG] 📬 Welcome email successfully sent.`);
           } catch (emailErr) {
-            console.error(`[EMAIL ERROR] Failed for ${customerEmail}:`, emailErr.message);
+            console.error(`[CEO ERROR] ❌ Resend failed: ${emailErr.message}`);
           }
         }
         break;
