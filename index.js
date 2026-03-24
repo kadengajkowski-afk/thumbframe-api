@@ -428,6 +428,7 @@ app.post('/checkout', async(req,res)=>{
     const session=await stripe.checkout.sessions.create({
       payment_method_types:['card'],
       mode:'subscription',
+      allow_promotion_codes:true,
       ...(email && email.trim() ? {customer_email: email.trim()} : {}),
       line_items:[{price:priceId,quantity:1}],
       success_url: `https://thumbframe.com/success?session_id={CHECKOUT_SESSION_ID}`,
