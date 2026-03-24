@@ -455,16 +455,18 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
 
       if (customerEmail) {
         console.log(`Webhook received: Upgrading ${customerEmail} to Pro...`);
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
-          .update({ is_pro: true })
-          .eq('email', customerEmail);
+          .upsert(
+            {
+              email: customerEmail,
+              is_pro: true
+            },
+            { onConflict: 'email' }
+          );
 
-        if (error) {
-          console.error("Supabase update error:", error.message);
-        } else {
-          console.log(`Success! ${customerEmail} is now Pro in the database.`);
-        }
+        if (error) console.error("DATABASE ERROR:", error.message);
+        else console.log(`SUCCESS: Created/Updated ${customerEmail} to Pro.`);
       }
 
       const email = customerEmail || session.customer_email;
