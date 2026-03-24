@@ -24,12 +24,16 @@ const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
 app.use(cors({
-  origin: '*',
+  origin: 'https://thumbframe.com',
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
 }));
 
-app.options('*', cors());
+app.options('*', cors({
+  origin: 'https://thumbframe.com',
+  credentials: true,
+}));
 app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
@@ -387,23 +391,41 @@ app.delete('/designs/:id', authMiddleware,(req,res)=>{
 // ── Stripe checkout ────────────────────────────────────────────────────────────
 app.post('/checkout', async(req,res)=>{
   try{
-    console.log('Checkout request received:', req.body);
-    console.log('Stripe key exists:', !!process.env.STRIPE_SECRET_KEY);
-    console.log('Stripe key starts with:', process.env.STRIPE_SECRET_KEY?.substring(0,7));
-    console.log('Pro price ID:', process.env.STRIPE_PRO_PRICE_ID);
-      const {email}=req.body;
+    console.log('[checkout] request started', {
+      body: req.body,
+      origin: req.headers.origin,
+    });
+    console.log('[checkout] STRIPE_SECRET_KEY found:', !!process.env.STRIPE_SECRET_KEY);
+
+    const {email}=req.body;
+    const priceId=process.env.STRIPE_PRO_PRICE_ID;
+
+    console.log('[checkout] priceId:', priceId);
+
+    if(!process.env.STRIPE_SECRET_KEY){
+      throw new Error('Missing STRIPE_SECRET_KEY');
+    }
+
+    if(!priceId){
+      throw new Error('Missing STRIPE_PRO_PRICE_ID');
+    }
+
     const session=await stripe.checkout.sessions.create({
       payment_method_types:['card'],
       mode:'subscription',
       ...(email && email.trim() ? {customer_email: email.trim()} : {}),
-        line_items:[{price:process.env.STRIPE_PRO_PRICE_ID,quantity:1}],
+      line_items:[{price:priceId,quantity:1}],
       success_url: `https://thumbframe.com/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `https://thumbframe.com/pricing`,
     });
+
+    console.log('[checkout] session created:', session.id);
     res.json({url:session.url});
   }catch(err){
-    console.error('Checkout error full:', err.message, err.type, err.code);
-    res.status(500).json({error:`Checkout failed: ${err.message}`});
+    console.error('[checkout] error:', err);
+    res.status(500).json({
+      error: err.message || 'Checkout failed',
+    });
   }
 });
 
