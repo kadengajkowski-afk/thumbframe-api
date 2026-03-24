@@ -391,16 +391,12 @@ app.post('/checkout', async(req,res)=>{
     console.log('Stripe key exists:', !!process.env.STRIPE_SECRET_KEY);
     console.log('Stripe key starts with:', process.env.STRIPE_SECRET_KEY?.substring(0,7));
     console.log('Pro price ID:', process.env.STRIPE_PRO_PRICE_ID);
-    const {plan='pro',email}=req.body;
-    const prices={
-      starter:process.env.STRIPE_STARTER_PRICE_ID,
-      pro:    process.env.STRIPE_PRO_PRICE_ID,
-    };
+      const {email}=req.body;
     const session=await stripe.checkout.sessions.create({
       payment_method_types:['card'],
       mode:'subscription',
       ...(email && email.trim() ? {customer_email: email.trim()} : {}),
-      line_items:[{price:prices[plan]||prices.pro,quantity:1}],
+        line_items:[{price:process.env.STRIPE_PRO_PRICE_ID,quantity:1}],
       success_url: `https://thumbframe.com/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `https://thumbframe.com/pricing`,
     });
