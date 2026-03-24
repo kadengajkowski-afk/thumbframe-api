@@ -28,7 +28,10 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
       canvas.getContext('2d').putImageData(
         historyRef.current[historyRef.current.length - 1], 0, 0
       );
-      flush();
+      // Force flush on undo even without hasStroked
+      const dataUrl = canvas.toDataURL('image/png');
+      loadedSrc.current = dataUrl;
+      setTimeout(()=>{ onUpdate({ src: dataUrl }); }, 50);
     },
   }));
 
@@ -85,19 +88,11 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   function flush() {
     const canvas = canvasRef.current;
     if (!canvas || !isReady.current) return;
-    if (!hasStroked.current) {
-      console.log('flush blocked - no strokes');
-      return;
-    }
-    console.log('flush firing - has strokes');
-    const tmp = document.createElement('canvas');
-    tmp.width  = layer.width;
-    tmp.height = layer.height;
-    tmp.getContext('2d').drawImage(canvas, 0, 0, layer.width, layer.height);
-    const dataUrl = tmp.toDataURL('image/png');
-    // ✅ Set loadedSrc BEFORE calling onUpdate to prevent reload loop
+    // ✅ NEVER flush unless user actually painted something
+    if (!hasStroked.current) return;
+    // ✅ Use PNG not JPEG to prevent compression blur
+    const dataUrl = canvas.toDataURL('image/png');
     loadedSrc.current = dataUrl;
-    // Small delay so React state update doesn't trigger reload
     setTimeout(()=>{
       onUpdate({ src: dataUrl });
     }, 50);
