@@ -11,7 +11,6 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   const stabPos        = useRef(null); // stabilized position lags behind mouse
   const cloneSource    = useRef(null);
   const isPainting     = useRef(false);
-  const hasStroked     = useRef(false);
   const isReady        = useRef(false);
   const historyRef     = useRef([]);
   const loadedSrc      = useRef(null);
@@ -34,17 +33,7 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
 
   useEffect(() => {
     if (!layer?.src || !active) return;
-    hasStroked.current = false;
     if (loadedSrc.current === layer.src) return;
-    // ✅ Don't reload if we just flushed — canvas already has correct pixels
-    if (loadedSrc.current && layer.src !== loadedSrc.current) {
-      // Only reload if src changed externally (not from our own flush)
-      const isSameCanvas = layer.src.length === loadedSrc.current.length;
-      if(isSameCanvas) {
-        loadedSrc.current = layer.src;
-        return;
-      }
-    }
     isReady.current = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -52,8 +41,8 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     const img = new Image();
     img.onload = () => {
       const z = zoom || 1;
-      canvas.width  = layer.width;
-      canvas.height = layer.height;
+      canvas.width  = Math.round(layer.width  * z);
+      canvas.height = Math.round(layer.height * z);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       historyRef.current = [ctx.getImageData(0, 0, canvas.width, canvas.height)];
@@ -79,24 +68,18 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
     if (!canvas || !isReady.current) return;
     const snap = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
     historyRef.current = [...historyRef.current.slice(-19), snap];
-    hasStroked.current = true;
   }
 
   function flush() {
     const canvas = canvasRef.current;
     if (!canvas || !isReady.current) return;
-    if (!hasStroked.current) return;
     const tmp = document.createElement('canvas');
     tmp.width  = layer.width;
     tmp.height = layer.height;
     tmp.getContext('2d').drawImage(canvas, 0, 0, layer.width, layer.height);
     const dataUrl = tmp.toDataURL('image/png');
-    // ✅ Set loadedSrc BEFORE calling onUpdate to prevent reload loop
     loadedSrc.current = dataUrl;
-    // Small delay so React state update doesn't trigger reload
-    setTimeout(()=>{
-      onUpdate({ src: dataUrl });
-    }, 50);
+    onUpdate({ src: dataUrl });
   }
 
   function getPressure(pos) {
@@ -730,8 +713,6 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
   }
 
   function onMouseDown(e) {
-    console.log('BRUSH MOUSEDOWN', e.clientX, e.clientY, 
-      'isReady:', isReady.current, 'active:', active);
     e.preventDefault(); e.stopPropagation();
     if (!isReady.current||!active) return;
     if (brushType==='clone'&&e.altKey) { cloneSource.current=getPos(e); return; }
@@ -823,12 +804,9 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
         onMouseLeave={onMouseLeave}
         style={{
           position:'absolute', top:0, left:0,
-          width: layer.width+'px',
-          height: layer.height+'px',
+          width:layer.width+'px', height:layer.height+'px',
           cursor:'none', display:'block',
           userSelect:'none', WebkitUserSelect:'none',
-          pointerEvents:'auto',
-          opacity: 0.99,
         }}
       />
     </div>
