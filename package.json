@@ -7,20 +7,21 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "sharp": "^0.33.2",
-    "replicate": "^0.25.2",
-    "uuid": "^9.0.0",
-    "stripe": "^14.21.0",
-    "node-fetch": "^2.7.0",
-    "form-data": "^4.0.0",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "openai": "^4.28.0",
     "@anthropic-ai/sdk": "^0.20.0",
+    "@supabase/supabase-js": "^2.100.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "form-data": "^4.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^2.7.0",
+    "openai": "^4.28.0",
+    "replicate": "^0.25.2",
     "resend": "^3.2.0",
-    "dotenv": "^16.4.5"
+    "sharp": "^0.33.2",
+    "stripe": "^14.21.0",
+    "uuid": "^9.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

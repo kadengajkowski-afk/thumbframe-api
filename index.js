@@ -14,6 +14,7 @@ const jwt        = require('jsonwebtoken');
 const OpenAI     = require('openai');
 const Anthropic  = require('@anthropic-ai/sdk');
 const { Resend } = require('resend');
+const { createClient } = require('@supabase/supabase-js');
 
 const app        = express();
 const PORT       = process.env.PORT || 5000;
@@ -23,6 +24,7 @@ const openai     = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+const supabase   = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
 const allowedOrigins = [
   'https://thumbframe.com',
@@ -442,13 +444,29 @@ app.post('/checkout', async(req,res)=>{
   }
 });
 
-app.post('/webhook', express.raw({type:'application/json'}),(req,res)=>{
+app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
   try{
     const sig=req.headers['stripe-signature'];
     const event=stripe.webhooks.constructEvent(req.body,sig,process.env.STRIPE_WEBHOOK_SECRET);
     if(event.type==='checkout.session.completed'){
-      const session=event.data.object;
-      const email=session.customer_email;
+      const session = event.data.object;
+      const customerEmail = session.customer_details?.email;
+
+      if (customerEmail) {
+        console.log(`Webhook received: Upgrading ${customerEmail} to Pro...`);
+        const { error } = await supabase
+          .from('profiles')
+          .update({ is_pro: true })
+          .eq('email', customerEmail);
+
+        if (error) {
+          console.error("Supabase update error:", error.message);
+        } else {
+          console.log(`Success! ${customerEmail} is now Pro in the database.`);
+        }
+      }
+
+      const email = customerEmail || session.customer_email;
       const apiKey=uuidv4();
       const keys=loadKeys();
       keys[apiKey]={email,plan:'pro',created:new Date().toISOString()};
