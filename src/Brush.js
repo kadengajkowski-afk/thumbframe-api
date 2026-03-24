@@ -822,9 +822,6 @@ export const BrushOverlay = forwardRef(function BrushOverlay(
           position:'absolute', top:0, left:0,
           width: layer.width+'px',
           height: layer.height+'px',
-          transformOrigin: 'top left',
-          transform: `scale(${zoom||1})`,
-          imageRendering: 'pixelated',
           cursor:'none', display:'block',
           userSelect:'none', WebkitUserSelect:'none',
         }}
