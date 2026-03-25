@@ -24,5 +24,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`--- SERVER LIVE ON PORT ${PORT} ---`);
+  console.log('--- API BOOTED ON PORT 5000 ---');
 });

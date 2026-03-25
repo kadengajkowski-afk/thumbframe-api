@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, memo } from 'react';
 import MemesPanel from './Memes';
 import BrushTool, { BrushOverlay } from './Brush';
 
+const API_BASE = 'https://thumbframe-api-production.up.railway.app';
+
 const PLATFORMS = {
   youtube:   { label:'YouTube',   width:1280, height:720,  preview:{ w:640, h:360 } },
   tiktok:    { label:'TikTok',    width:1080, height:1920, preview:{ w:152, h:270 } },
@@ -504,7 +506,7 @@ function Slider({min,max,step,value,onChange,onCommit,style}){
   );
 }
 
-export default function Editor({onExit, user, token, apiUrl}){
+export default function Editor({onExit, user, token}){
   const canvasRef       = useRef(null);
   const brushOverlayRef = useRef(null);
   const cmdInputRef     = useRef(null);
@@ -878,7 +880,7 @@ export default function Editor({onExit, user, token, apiUrl}){
         })),
       };
 
-      const res = await fetch('https://thumbframe-api-production.up.railway.app/ai-command',{
+      const res = await fetch(`${API_BASE}/ai-command`,{
         method:  'POST',
         headers: {'Content-Type':'application/json'},
         body:    JSON.stringify({ command:cmd, canvasState }),
@@ -1518,8 +1520,8 @@ export default function Editor({onExit, user, token, apiUrl}){
       const updated=[design,...savedDesigns.filter(d=>d.name!==name)].slice(0,20);
       setSavedDesigns(updated);localStorage.setItem('thumbframe_designs',JSON.stringify(updated));
       // Also save to backend if logged in
-      if(token && apiUrl){
-        fetch(`${apiUrl}/designs/save`,{
+      if(token){
+        fetch(`${API_BASE}/designs/save`,{
           method:'POST',
           headers:{'Content-Type':'application/json','authorization':`Bearer ${token}`},
           body:JSON.stringify({name:name||'Untitled',platform,layers:JSON.parse(JSON.stringify(layers)),brightness,contrast,saturation,hue,thumbnail}),
@@ -2660,7 +2662,7 @@ export default function Editor({onExit, user, token, apiUrl}){
                 <div style={{color:T.muted}}>
                   Upgrade to Pro for full {p.width}×{p.height}px export.
                 </div>
-                <button onClick={()=>fetch('https://thumbframe-api-production.up.railway.app/checkout',{
+                <button onClick={()=>fetch(`${API_BASE}/checkout`,{
   method:'POST',
   headers:{'Content-Type':'application/json'},
   body:JSON.stringify({plan:'pro'}),
@@ -2811,7 +2813,7 @@ export default function Editor({onExit, user, token, apiUrl}){
             <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:'none'}}/>
           </label>
           <button onClick={()=>setShowDownload(true)} style={{padding:'6px 16px',borderRadius:8,border:'none',background:T.success,color:'#fff',cursor:'pointer',fontSize:12,fontWeight:'700',display:'flex',alignItems:'center',gap:5,boxShadow:'0 2px 8px rgba(34,197,94,0.35)'}} onMouseEnter={e=>e.currentTarget.style.background='#16a34a'} onMouseLeave={e=>e.currentTarget.style.background=T.success}>↓ Download</button>
-          <button onClick={()=>fetch('https://thumbframe-api-production.up.railway.app/checkout',{
+          <button onClick={()=>fetch(`${API_BASE}/checkout`,{
   method:'POST',
   headers:{'Content-Type':'application/json'},
   body:JSON.stringify({plan:'pro'}),
@@ -4422,7 +4424,7 @@ export default function Editor({onExit, user, token, apiUrl}){
                 const reader=new FileReader();
                 reader.onload=async()=>{
                   try{
-                    const res=await fetch('https://thumbframe-api-production.up.railway.app/remove-bg',{
+                    const res=await fetch(`${API_BASE}/remove-bg`,{
                       method:'POST',
                       headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({imageUrl:reader.result}),
@@ -4481,7 +4483,7 @@ export default function Editor({onExit, user, token, apiUrl}){
           if(!prompt.trim()){alert('Enter a prompt first');return;}
           btn.textContent='Generating...';btn.disabled=true;btn.style.opacity='0.6';
           try{
-            const res=await fetch('https://thumbframe-api-production.up.railway.app/ai-generate',{
+            const res=await fetch(`${API_BASE}/ai-generate`,{
               method:'POST',
               headers:{'Content-Type':'application/json'},
               body:JSON.stringify({prompt}),
