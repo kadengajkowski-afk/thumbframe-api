@@ -47,7 +47,16 @@ app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
 // ── Serve React Frontend (MUST be before API routes) ──────────────────────────
-app.use(express.static(path.join(__dirname, 'build')));
+app.use(express.static(path.join(__dirname, 'build'), {
+  maxAge: 0,
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+}));
 
 // ── Version Test Route ─────────────────────────────────────────────────────────
 app.get('/version-test', (req, res) => res.send('API VERSION 2.1 IS LIVE'));
@@ -613,6 +622,9 @@ app.post('/api/analyze-face', (req, res) => {
 
 // Catch-all route: serve index.html for all non-API requests (SPA routing)
 app.get('*', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
