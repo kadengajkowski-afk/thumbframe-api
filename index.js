@@ -245,7 +245,7 @@ app.post('/auth/signup', async(req,res)=>{
                 <li>Export PNG, JPG, or WebP</li>
               </ul>
             </div>
-            <a href="http://localhost:3000/editor"
+            <a href="${process.env.FRONTEND_URL || 'https://thumbframe.com'}/editor"
                style="display:inline-block;padding:14px 28px;background:#c45c2e;color:#fff;
                       text-decoration:none;border-radius:8px;font-weight:700;font-size:15px">
               Open ThumbFrame →
@@ -312,7 +312,7 @@ app.post('/auth/forgot-password', async(req,res)=>{
             <p style="color:#666;font-size:15px;line-height:1.6">
               Click the button below to reset your password. This link expires in 1 hour.
             </p>
-            <a href="http://localhost:3000/reset-password?token=${token}"
+            <a href="${process.env.FRONTEND_URL || 'https://thumbframe.com'}/reset-password?token=${token}"
                style="display:inline-block;padding:14px 28px;background:#c45c2e;color:#fff;
                       text-decoration:none;border-radius:8px;font-weight:700;font-size:15px">
               Reset password →
@@ -531,4 +531,4 @@ app.post('/api/analyze-face', (req, res) => {
   res.json({ faces: [{ x: 100, y: 50, w: 120, h: 120, score: 92 }] });
 });
 
-app.listen(PORT,()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
+app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
