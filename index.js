@@ -49,6 +49,9 @@ app.use(express.json({ limit:'50mb' }));
 // ── Serve React Frontend (MUST be before API routes) ──────────────────────────
 app.use(express.static(path.join(__dirname, 'build')));
 
+// ── Version Test Route ─────────────────────────────────────────────────────────
+app.get('/version-test', (req, res) => res.send('API VERSION 2.1 IS LIVE'));
+
 // ── File storage ───────────────────────────────────────────────────────────────
 const KEYS_FILE    = path.join(__dirname,'keys.json');
 const USERS_FILE   = path.join(__dirname,'users.json');

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import Editor from './Editor';
 
+console.log("--- SYSTEM BOOT V2.1 ---");
+
 // ── Palette ────────────────────────────────────────────────────────────────────
 const C = {
   bg:       '#f5f0e8',
