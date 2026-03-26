@@ -510,6 +510,8 @@ function Slider({min,max,step,value,onChange,onCommit,style}){
 }
 
 export default function Editor({onExit, user, token, brandKit}){
+  console.log("BRAND KIT LOADED", brandKit);
+  
   const canvasRef       = useRef(null);
   const brushOverlayRef = useRef(null);
   const cmdInputRef     = useRef(null);

@@ -46,6 +46,9 @@ app.options('*', cors());
 app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
+// ── Serve React Frontend (MUST be before API routes) ──────────────────────────
+app.use(express.static(path.join(__dirname, 'build')));
+
 // ── File storage ───────────────────────────────────────────────────────────────
 const KEYS_FILE    = path.join(__dirname,'keys.json');
 const USERS_FILE   = path.join(__dirname,'users.json');
@@ -604,9 +607,6 @@ app.post('/api/analyze-face', (req, res) => {
   // Mock face analysis — returns a single detected face with a score
   res.json({ faces: [{ x: 100, y: 50, w: 120, h: 120, score: 92 }] });
 });
-
-// ── Serve React Frontend ───────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'build')));
 
 // Catch-all route: serve index.html for all non-API requests (SPA routing)
 app.get('*', (req, res) => {
