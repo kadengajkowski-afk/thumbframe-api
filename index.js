@@ -605,4 +605,12 @@ app.post('/api/analyze-face', (req, res) => {
   res.json({ faces: [{ x: 100, y: 50, w: 120, h: 120, score: 92 }] });
 });
 
+// ── Serve React Frontend ───────────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, 'build')));
+
+// Catch-all route: serve index.html for all non-API requests (SPA routing)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
