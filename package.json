@@ -3,17 +3,33 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "@supabase/supabase-js": "^2.100.0",
     "@testing-library/dom": "^10.4.1",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^13.5.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
     "fabric": "^7.2.0",
+    "form-data": "^4.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^2.7.0",
+    "openai": "^4.28.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-scripts": "5.0.1",
+    "replicate": "^0.25.2",
+    "resend": "^3.2.0",
+    "sharp": "^0.33.2",
+    "stripe": "^14.21.0",
+    "uuid": "^9.0.0",
     "web-vitals": "^2.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "overrides": {
     "yaml": "2.8.3"
