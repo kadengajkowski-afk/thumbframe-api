@@ -1528,18 +1528,44 @@ export default function Editor({onExit, user, token, brandKit}){
       // Generate thumbnail from canvas
       const canvas = canvasRef.current;
       const thumbnail = canvas ? canvas.toDataURL('image/jpeg', 0.5) : null;
-      const design={id:Date.now(),name:name||'Untitled',created:new Date().toLocaleDateString(),platform,layers:JSON.parse(JSON.stringify(layers)),brightness,contrast,saturation,hue,thumbnail};
-      const updated=[design,...savedDesigns.filter(d=>d.name!==name)].slice(0,20);
-      setSavedDesigns(updated);localStorage.setItem('thumbframe_designs',JSON.stringify(updated));
+
+      // Look for an existing design to keep the same ID and overwrite
+      const existingDesign = savedDesigns.find(d => d.name === name);
+
+      const design={
+        id: existingDesign ? existingDesign.id : crypto.randomUUID(),
+        name:name||'Untitled',
+        created:new Date().toLocaleDateString(),
+        platform,
+        layers:JSON.parse(JSON.stringify(layers)),
+        brightness,
+        contrast,
+        saturation,
+        hue,
+        thumbnail
+      };
+
       // Also save to backend if logged in
       if(token){
         fetch(`${API_BASE}/designs/save`,{
           method:'POST',
           headers:{'Content-Type':'application/json','authorization':`Bearer ${token}`},
-          body:JSON.stringify({name:name||'Untitled',platform,layers:JSON.parse(JSON.stringify(layers)),brightness,contrast,saturation,hue,thumbnail}),
+          body:JSON.stringify(design),
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.id) {
+             const finalDesign = {...design, id: data.id};
+             const updated=[finalDesign,...savedDesigns.filter(d=>d.name!==name)].slice(0,20);
+             setSavedDesigns(updated);
+             setCmdLog(`Saved: ${name}`);
+          }
         }).catch(()=>{});
+      } else {
+        const updated=[design,...savedDesigns.filter(d=>d.name!==name)].slice(0,20);
+        setSavedDesigns(updated);localStorage.setItem('thumbframe_designs',JSON.stringify(updated));
+        setCmdLog(`Saved locally: ${name}`);
       }
-      setCmdLog(`Saved: ${name}`);
     }catch(e){}
   }
   function loadDesign(d){setLayers(d.layers);setPlatform(d.platform||'youtube');setBrightness(d.brightness||100);setContrast(d.contrast||110);setSaturation(d.saturation||110);setHue(d.hue||0);setSelectedId(null);setShowFileTab(false);}

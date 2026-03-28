@@ -64,14 +64,11 @@ app.get('/version-test', (req, res) => res.send('API VERSION 2.1 IS LIVE'));
 // ── File storage ───────────────────────────────────────────────────────────────
 const KEYS_FILE    = path.join(__dirname,'keys.json');
 const USERS_FILE   = path.join(__dirname,'users.json');
-const DESIGNS_FILE = path.join(__dirname,'designs.json');
 
 function loadKeys(){ try{ return JSON.parse(fs.readFileSync(KEYS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveKeys(k){ fs.writeFileSync(KEYS_FILE,JSON.stringify(k,null,2)); }
 function loadUsers(){ try{ return JSON.parse(fs.readFileSync(USERS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveUsers(u){ fs.writeFileSync(USERS_FILE,JSON.stringify(u,null,2)); }
-function loadDesigns(){ try{ return JSON.parse(fs.readFileSync(DESIGNS_FILE,'utf8')); }catch(e){ return {}; } }
-function saveDesigns(d){ fs.writeFileSync(DESIGNS_FILE,JSON.stringify(d,null,2)); }
 function validateKey(key){ const keys=loadKeys(); return keys[key]||null; }
 
 function authMiddleware(req,res,next){
@@ -439,51 +436,111 @@ app.post('/auth/reset-password', async(req,res)=>{
 });
 
 // ── Designs ────────────────────────────────────────────────────────────────────
-app.post('/designs/save', authMiddleware,(req,res)=>{
+app.post('/designs/save', authMiddleware, async (req,res)=>{
   try{
-    const {name,platform,layers,brightness,contrast,saturation,hue,thumbnail}=req.body;
-    const designs=loadDesigns();
-    if(!designs[req.user.email]) designs[req.user.email]=[];
-    const id=Date.now().toString();
-    const existing=designs[req.user.email].findIndex(d=>d.name===name);
-    const design={id,name,platform,layers,brightness,contrast,saturation,hue,
-      thumbnail:thumbnail||null,created:new Date().toLocaleDateString(),
-      updated:new Date().toISOString()};
-    if(existing>=0){
-      designs[req.user.email][existing]={...designs[req.user.email][existing],...design};
-    }else{
-      designs[req.user.email].unshift(design);
-    }
-    designs[req.user.email]=designs[req.user.email].slice(0,50);
-    saveDesigns(designs);
-    res.json({success:true,id:design.id});
-  }catch(err){
-    res.status(500).json({error:'Save failed'});
+    const { id, name, platform, layers, brightness, contrast, saturation, hue, thumbnail } = req.body;
+
+    const design = {
+      id: id || uuidv4(),
+      user_email: req.user.email,
+      name: name || 'Untitled',
+      platform,
+      canvas_data: layers,
+      brightness,
+      contrast,
+      saturation,
+      hue,
+      thumbnail_url: thumbnail || null,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('thumbnails')
+      .upsert(design, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, id: data.id });
+  } catch(err){
+    console.error('Save design error:', err);
+    res.status(500).json({ error: 'Save failed' });
   }
 });
 
-app.get('/designs', authMiddleware,(req,res)=>{
-  const designs=loadDesigns();
-  const list=(designs[req.user.email]||[]).map(d=>({
-    id:d.id,name:d.name,platform:d.platform,
-    created:d.created,updated:d.updated,thumbnail:d.thumbnail,
-  }));
-  res.json({designs:list});
+app.get('/designs', authMiddleware, async (req,res)=>{
+  try {
+    const { data, error } = await supabase
+      .from('thumbnails')
+      .select('id, name, platform, created_at, updated_at, thumbnail_url')
+      .eq('user_email', req.user.email)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+
+    const list = data.map(d => ({
+      id: d.id,
+      name: d.name,
+      platform: d.platform,
+      created: new Date(d.created_at || d.updated_at).toLocaleDateString(),
+      updated: d.updated_at,
+      thumbnail: d.thumbnail_url
+    }));
+
+    res.json({ designs: list });
+  } catch(err) {
+    console.error('Fetch designs error:', err);
+    res.status(500).json({ error: 'Failed to fetch designs' });
+  }
 });
 
-app.get('/designs/:id', authMiddleware,(req,res)=>{
-  const designs=loadDesigns();
-  const design=(designs[req.user.email]||[]).find(d=>d.id===req.params.id);
-  if(!design) return res.status(404).json({error:'Not found'});
-  res.json({design});
+app.get('/designs/:id', authMiddleware, async (req,res)=>{
+  try {
+    const { data, error } = await supabase
+      .from('thumbnails')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('user_email', req.user.email)
+      .single();
+
+    if (error) throw error;
+
+    const design = {
+      id: data.id,
+      name: data.name,
+      platform: data.platform,
+      layers: data.canvas_data,
+      brightness: data.brightness,
+      contrast: data.contrast,
+      saturation: data.saturation,
+      hue: data.hue,
+      thumbnail: data.thumbnail_url,
+      created: new Date(data.created_at || data.updated_at).toLocaleDateString(),
+      updated: data.updated_at
+    };
+
+    res.json({ design });
+  } catch(err) {
+    console.error('Fetch design error:', err);
+    res.status(404).json({ error: 'Not found' });
+  }
 });
 
-app.delete('/designs/:id', authMiddleware,(req,res)=>{
-  const designs=loadDesigns();
-  if(!designs[req.user.email]) return res.status(404).json({error:'No designs'});
-  designs[req.user.email]=designs[req.user.email].filter(d=>d.id!==req.params.id);
-  saveDesigns(designs);
-  res.json({success:true});
+app.delete('/designs/:id', authMiddleware, async (req,res)=>{
+  try {
+    const { error } = await supabase
+      .from('thumbnails')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('user_email', req.user.email);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch(err) {
+    console.error('Delete design error:', err);
+    res.status(500).json({ error: 'Delete failed' });
+  }
 });
 
 // ── Stripe checkout ────────────────────────────────────────────────────────────

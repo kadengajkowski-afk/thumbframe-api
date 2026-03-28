@@ -1,8 +1,39 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import Cropper from 'react-easy-crop';
 
 const API_BASE = process.env.NODE_ENV === 'development'
   ? 'http://localhost:5000'
   : 'https://thumbframe-api-production.up.railway.app';
+
+// Helper to extract a cropped image using Canvas API
+const getCroppedImg = async (imageSrc, pixelCrop) => {
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.addEventListener('load', () => resolve(img));
+    img.addEventListener('error', (error) => reject(error));
+    img.src = imageSrc;
+  });
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = pixelCrop.width;
+  canvas.height = pixelCrop.height;
+
+  ctx.drawImage(
+    image,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    pixelCrop.width,
+    pixelCrop.height
+  );
+
+  return canvas.toDataURL('image/png');
+};
 
 export default function BrandKitSetupModal({ 
   T, 
@@ -18,28 +49,47 @@ export default function BrandKitSetupModal({
   const [secondary, setSecondary] = useState(brandKitColors.secondary);
   const [uploading, setUploading] = useState(false);
 
+  // Cropper state
+  const [imageSrc, setImageSrc] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+
+  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
+
   async function handleFaceUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
     
-    setUploading(true);
     const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/brand-kit/upload-face`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'authorization': `Bearer ${token}` },
-          body: JSON.stringify({ imageData: reader.result }),
-        });
-        const data = await res.json();
-        setBrandKitFace(data.url);
-        setUploading(false);
-      } catch (e) {
-        alert('Upload failed');
-        setUploading(false);
-      }
+    reader.onload = () => {
+      setImageSrc(reader.result);
     };
     reader.readAsDataURL(file);
+  }
+
+  async function confirmCrop() {
+    if (!imageSrc || !croppedAreaPixels) return;
+
+    setUploading(true);
+    try {
+      const croppedImageBase64 = await getCroppedImg(imageSrc, croppedAreaPixels);
+
+      const res = await fetch(`${API_BASE}/brand-kit/upload-face`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'authorization': `Bearer ${token}` },
+        body: JSON.stringify({ imageData: croppedImageBase64 }),
+      });
+      const data = await res.json();
+      setBrandKitFace(data.url);
+      setImageSrc(null); // Close cropper
+    } catch (e) {
+      alert('Upload failed');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function saveBrandKit() {
@@ -82,7 +132,26 @@ export default function BrandKitSetupModal({
 
         <div style={{marginBottom:20}}>
           <label style={{fontSize:12,fontWeight:'600',color:T.text,display:'block',marginBottom:6}}>Your Face (optional)</label>
-          {brandKitFace ? (
+
+          {imageSrc ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ position: 'relative', width: '100%', height: 250, background: '#000', borderRadius: 8, overflow: 'hidden' }}>
+                <Cropper
+                  image={imageSrc}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onCropComplete={onCropComplete}
+                  onZoomChange={setZoom}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setImageSrc(null)} style={{flex:1,padding:8,borderRadius:5,border:`1px solid ${T.border}`,background:'transparent',color:T.text,cursor:'pointer',fontSize:12,fontWeight:'600'}}>Cancel Crop</button>
+                <button onClick={confirmCrop} disabled={uploading} style={{flex:1,padding:8,borderRadius:5,border:'none',background:T.accent,color:'#fff',cursor:'pointer',fontSize:12,fontWeight:'700', opacity: uploading ? 0.6 : 1}}>{uploading ? 'Uploading...' : 'Confirm Crop'}</button>
+              </div>
+            </div>
+          ) : brandKitFace ? (
             <div style={{position:'relative',width:120,height:120,borderRadius:10,overflow:'hidden',border:`2px solid ${T.border}`}}>
               <img src={brandKitFace} alt="Face" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
               <button onClick={()=>setBrandKitFace(null)} style={{position:'absolute',top:4,right:4,padding:'4px 8px',borderRadius:5,background:'rgba(0,0,0,0.8)',color:'#fff',border:'none',fontSize:10,cursor:'pointer'}}>×</button>
@@ -95,10 +164,12 @@ export default function BrandKitSetupModal({
           )}
         </div>
 
-        <div style={{display:'flex',gap:8}}>
-          <button onClick={()=>setShowBrandKitSetup(false)} style={{flex:1,padding:10,borderRadius:7,border:`1px solid ${T.border}`,background:'transparent',color:T.text,cursor:'pointer',fontSize:13,fontWeight:'600'}}>Cancel</button>
-          <button onClick={saveBrandKit} style={{flex:1,padding:10,borderRadius:7,border:'none',background:T.accent,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:'700'}}>Save Brand Kit</button>
-        </div>
+        {!imageSrc && (
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>setShowBrandKitSetup(false)} style={{flex:1,padding:10,borderRadius:7,border:`1px solid ${T.border}`,background:'transparent',color:T.text,cursor:'pointer',fontSize:13,fontWeight:'600'}}>Cancel</button>
+            <button onClick={saveBrandKit} style={{flex:1,padding:10,borderRadius:7,border:'none',background:T.accent,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:'700'}}>Save Brand Kit</button>
+          </div>
+        )}
       </div>
     </div>
   );
