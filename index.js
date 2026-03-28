@@ -312,7 +312,7 @@ app.get('/brand-kit', authMiddleware, async(req,res)=>{
     const {data,error}=await supabase
       .from('brand_kits')
       .select('*')
-      .eq('user_id',req.user.email)
+      .eq('user_email',req.user.email)
       .single();
     
     if(error&&error.code!=='PGRST116') throw error;
@@ -334,12 +334,12 @@ app.post('/brand-kit', authMiddleware, async(req,res)=>{
     const {data,error}=await supabase
       .from('brand_kits')
       .upsert({
-        user_id:req.user.email,
+        user_email:req.user.email,
         primary_color:primaryColor,
         secondary_color:secondaryColor,
         face_image_url:faceImageUrl||null,
         updated_at:new Date().toISOString(),
-      },{onConflict:'user_id'})
+      },{onConflict:'user_email'})
       .select()
       .single();
 
