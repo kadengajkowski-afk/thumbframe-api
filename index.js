@@ -639,8 +639,54 @@ app.post('/api/segment', authMiddleware, async(req,res)=>{
 });
 
 app.post('/api/analyze-face', (req, res) => {
-  // Mock face analysis — returns a single detected face with a score
   res.json({ faces: [{ x: 100, y: 50, w: 120, h: 120, score: 92 }] });
+});
+
+// ── AI Expression Enhancement — SD Inpainting via Replicate ───────────────────
+app.post('/api/enhance-expression', authMiddleware, async(req,res)=>{
+  try{
+    const{faceCrop,mask,instruction}=req.body;
+    if(!faceCrop||!faceCrop.startsWith('data:image/')||!mask||!instruction){
+      return res.status(400).json({success:false,error:'Missing faceCrop, mask, or instruction',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok){
+      return res.status(429).json({success:false,error:quota.message,code:quota.code});
+    }
+
+    const PROMPTS={
+      'open mouth more':      'photorealistic portrait, same person, open mouth wide smile, excited energetic expression, sharp focus, high quality',
+      'raise eyebrows':       'photorealistic portrait, same person, raised eyebrows, shocked surprised expression, wide eyes, high quality',
+      'open eyes wider':      'photorealistic portrait, same person, wide open eyes, shocked surprised energetic expression, high quality',
+      'excited expression':   'photorealistic portrait, same person, big smile open mouth raised eyebrows wide eyes, ultra excited expression, high quality',
+      'shocked expression':   'photorealistic portrait, same person, shocked open mouth wide eyes raised eyebrows, surprised expression, high quality',
+    };
+    const prompt=PROMPTS[instruction]||`photorealistic portrait, same person, ${instruction}, high quality`;
+
+    console.log(`[ENHANCE-EXPR] Running SD inpainting: "${instruction}"`);
+    const output=await replicate.run('stability-ai/stable-diffusion-inpainting',{
+      input:{
+        prompt,
+        negative_prompt:'blurry, low quality, cartoon, anime, painting, distorted face, ugly, bad anatomy, extra limbs',
+        image:faceCrop,
+        mask,
+        num_inference_steps:20,
+        guidance_scale:7.5,
+        strength:0.8,
+      },
+    });
+
+    const imageUrl=Array.isArray(output)?output[0]:output;
+    if(!imageUrl) throw new Error('No image returned from model');
+
+    const r=await fetch(imageUrl);
+    const buf=Buffer.from(await r.arrayBuffer());
+    res.json({success:true,image:`data:image/png;base64,${buf.toString('base64')}`});
+  }catch(err){
+    console.error('[ENHANCE-EXPR] Error:',err.message);
+    res.status(500).json({success:false,error:`Enhancement failed: ${err.message}`,code:'API_FAILURE'});
+  }
 });
 
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
