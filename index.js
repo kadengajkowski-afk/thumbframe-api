@@ -59,6 +59,48 @@ function loadDesigns(){ try{ return JSON.parse(fs.readFileSync(DESIGNS_FILE,'utf
 function saveDesigns(d){ fs.writeFileSync(DESIGNS_FILE,JSON.stringify(d,null,2)); }
 function validateKey(key){ const keys=loadKeys(); return keys[key]||null; }
 
+// ── AI Quota System ────────────────────────────────────────────────────────────
+function getPlanQuota(plan){
+  switch((plan||'free').toLowerCase()){
+    case 'agency':  return{limit:Infinity, period:'month'};
+    case 'pro':     return{limit:300,      period:'month'};
+    case 'starter': return{limit:50,       period:'month'};
+    default:        return{limit:3,        period:'day'};
+  }
+}
+
+function checkAndDecrementQuota(email){
+  const users=loadUsers();
+  const user=users[email];
+  if(!user) return{ok:false,message:'User not found',code:'INVALID_INPUT'};
+
+  const {limit,period}=getPlanQuota(user.plan);
+  if(limit===Infinity) return{ok:true};
+
+  const now=Date.now();
+  let usage=user.aiUsage||{count:0,resetAt:0};
+
+  if(now>=(usage.resetAt||0)){
+    const next=new Date();
+    if(period==='day'){next.setDate(next.getDate()+1);next.setHours(0,0,0,0);}
+    else{next.setMonth(next.getMonth()+1);next.setDate(1);next.setHours(0,0,0,0);}
+    usage={count:0,resetAt:next.getTime()};
+  }
+
+  if(usage.count>=limit){
+    const planLabel=(user.plan||'free').charAt(0).toUpperCase()+(user.plan||'free').slice(1);
+    const msg=(!user.plan||user.plan==='free')
+      ?'Free plan: 3 AI actions per day used. Upgrade to Starter for 50/month.'
+      :`${planLabel} plan limit (${limit}/${period}) reached. Upgrade to Agency for unlimited.`;
+    return{ok:false,message:msg,code:'QUOTA_EXCEEDED'};
+  }
+
+  usage.count++;
+  users[email]={...user,aiUsage:usage};
+  saveUsers(users);
+  return{ok:true,remaining:limit-usage.count};
+}
+
 function authMiddleware(req,res,next){
   const token=req.headers['authorization']?.split(' ')[1];
   if(!token) return res.status(401).json({error:'No token'});
@@ -525,6 +567,76 @@ setInterval(()=>{
     .then(()=>console.log('Keep-alive ping sent'))
     .catch(()=>console.log('Keep-alive ping failed'));
 }, 14 * 60 * 1000);
+
+// ── Smart Subject Detection — SAM 2 via Replicate ─────────────────────────────
+app.post('/api/segment', authMiddleware, async(req,res)=>{
+  try{
+    const {image}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Invalid image data',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok){
+      return res.status(429).json({success:false,error:quota.message,code:quota.code});
+    }
+
+    let masks=null;
+
+    // ── Attempt 1: SAM 2 ──────────────────────────────────────────────────────
+    try{
+      console.log('[SEGMENT] Running SAM 2...');
+      const output=await replicate.run('meta/sam-2',{
+        input:{
+          image,
+          points_per_side:        16,   // 16×16 grid — faster than default 32
+          pred_iou_thresh:        0.86,
+          stability_score_thresh: 0.92,
+          min_mask_region_area:   500,  // skip tiny noise masks
+        },
+      });
+
+      if(Array.isArray(output)&&output.length>0){
+        console.log(`[SEGMENT] SAM 2 returned ${output.length} masks`);
+        masks=await Promise.all(
+          output.slice(0,8).map(async(maskUrl)=>{
+            const r=await fetch(maskUrl);
+            const buf=Buffer.from(await r.arrayBuffer());
+            return`data:image/png;base64,${buf.toString('base64')}`;
+          })
+        );
+      }
+    }catch(sam2Err){
+      console.warn('[SEGMENT] SAM 2 failed:',sam2Err.message);
+    }
+
+    // ── Attempt 2: RMBG-2.0 fallback ─────────────────────────────────────────
+    if(!masks||masks.length===0){
+      try{
+        console.log('[SEGMENT] Falling back to RMBG-2.0...');
+        const output=await replicate.run('briaai/rmbg-2.0',{input:{image}});
+        const maskUrl=typeof output==='string'?output:output?.[0];
+        if(maskUrl){
+          const r=await fetch(maskUrl);
+          const buf=Buffer.from(await r.arrayBuffer());
+          masks=[`data:image/png;base64,${buf.toString('base64')}`];
+          console.log('[SEGMENT] RMBG-2.0 fallback succeeded');
+        }
+      }catch(rmbgErr){
+        console.error('[SEGMENT] RMBG-2.0 also failed:',rmbgErr.message);
+      }
+    }
+
+    if(!masks||masks.length===0){
+      return res.status(500).json({success:false,error:'No objects detected. Try a clearer thumbnail.',code:'API_FAILURE'});
+    }
+
+    res.json({success:true,masks});
+  }catch(err){
+    console.error('[SEGMENT] Error:',err.message);
+    res.status(500).json({success:false,error:`Segmentation failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
 
 app.post('/api/analyze-face', (req, res) => {
   // Mock face analysis — returns a single detected face with a score
