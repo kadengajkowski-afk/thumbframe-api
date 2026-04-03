@@ -13,6 +13,7 @@ const bcrypt     = require('bcryptjs');
 const jwt        = require('jsonwebtoken');
 const OpenAI     = require('openai');
 const Anthropic  = require('@anthropic-ai/sdk');
+const sharp      = require('sharp');
 const { Resend } = require('resend');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -47,9 +48,12 @@ app.use('/webhook', express.raw({ type:'application/json' }));
 app.use(express.json({ limit:'50mb' }));
 
 // ── File storage ───────────────────────────────────────────────────────────────
-const KEYS_FILE    = path.join(__dirname,'keys.json');
-const USERS_FILE   = path.join(__dirname,'users.json');
-const DESIGNS_FILE = path.join(__dirname,'designs.json');
+const KEYS_FILE     = path.join(__dirname,'keys.json');
+const USERS_FILE    = path.join(__dirname,'users.json');
+const DESIGNS_FILE  = path.join(__dirname,'designs.json');
+const TEAMS_FILE    = path.join(__dirname,'teams.json');
+const COMMENTS_FILE = path.join(__dirname,'comments.json');
+const VERSIONS_FILE = path.join(__dirname,'versions.json');
 
 function loadKeys(){ try{ return JSON.parse(fs.readFileSync(KEYS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveKeys(k){ fs.writeFileSync(KEYS_FILE,JSON.stringify(k,null,2)); }
@@ -57,6 +61,12 @@ function loadUsers(){ try{ return JSON.parse(fs.readFileSync(USERS_FILE,'utf8'))
 function saveUsers(u){ fs.writeFileSync(USERS_FILE,JSON.stringify(u,null,2)); }
 function loadDesigns(){ try{ return JSON.parse(fs.readFileSync(DESIGNS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveDesigns(d){ fs.writeFileSync(DESIGNS_FILE,JSON.stringify(d,null,2)); }
+function loadTeams(){ try{ return JSON.parse(fs.readFileSync(TEAMS_FILE,'utf8')); }catch(e){ return {}; } }
+function saveTeams(t){ fs.writeFileSync(TEAMS_FILE,JSON.stringify(t,null,2)); }
+function loadComments(){ try{ return JSON.parse(fs.readFileSync(COMMENTS_FILE,'utf8')); }catch(e){ return {}; } }
+function saveComments(c){ fs.writeFileSync(COMMENTS_FILE,JSON.stringify(c,null,2)); }
+function loadVersions(){ try{ return JSON.parse(fs.readFileSync(VERSIONS_FILE,'utf8')); }catch(e){ return {}; } }
+function saveVersions(v){ fs.writeFileSync(VERSIONS_FILE,JSON.stringify(v,null,2)); }
 function validateKey(key){ const keys=loadKeys(); return keys[key]||null; }
 
 // ── AI Quota System ────────────────────────────────────────────────────────────
@@ -686,6 +696,1303 @@ app.post('/api/enhance-expression', authMiddleware, async(req,res)=>{
   }catch(err){
     console.error('[ENHANCE-EXPR] Error:',err.message);
     res.status(500).json({success:false,error:`Enhancement failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── Niche Profiles — Feature J ────────────────────────────────────────────────
+const NICHE_PROFILES = {
+  gaming: {
+    label:'Gaming', emoji:'🎮',
+    promptContext:'YouTube gaming channel. Audience is 13-34 male gamers who respond to high-energy reactions, intense competitive moments, shock/hype expressions, bold neon colors, and immediate visual excitement. Reference gaming terminology naturally.',
+    defaultColorGrade:'neon',
+    defaultBgHint:'dramatic gaming setup, RGB lighting, dark room with glowing monitors, epic gaming moment, no people',
+    ctrWeights:{ face_prominence:1.2, text_readability:1.1, color_contrast:1.2, emotional_intensity:1.3, composition:0.9, niche_relevance:1.0 },
+  },
+  tech: {
+    label:'Tech', emoji:'💻',
+    promptContext:'YouTube tech channel covering reviews, tutorials, and product deep-dives. Audience values clarity, product close-ups, authoritative confident expressions, and clean modern aesthetics. Avoid hype language — prefer precision.',
+    defaultColorGrade:'cool',
+    defaultBgHint:'minimal tech workspace, clean desk, soft ambient lighting, modern electronics, subtle gradient, no people',
+    ctrWeights:{ face_prominence:1.0, text_readability:1.2, color_contrast:1.0, emotional_intensity:0.9, composition:1.3, niche_relevance:1.2 },
+  },
+  vlog: {
+    label:'Vlog', emoji:'🎥',
+    promptContext:'YouTube lifestyle and vlog channel. Audience connects through authentic personal moments, genuine expressions, real locations, and story-driven emotional beats. Relatability beats perfection here.',
+    defaultColorGrade:'warm',
+    defaultBgHint:'lifestyle photography backdrop, natural outdoor setting, golden hour lighting, relatable everyday scene, no people',
+    ctrWeights:{ face_prominence:1.4, text_readability:0.9, color_contrast:0.9, emotional_intensity:1.2, composition:1.1, niche_relevance:1.0 },
+  },
+  cooking: {
+    label:'Cooking', emoji:'🍳',
+    promptContext:'YouTube cooking and food channel. Audience responds to appetite-triggering visuals, delicious-looking results, creator reactions to tasting, and clear recipe outcomes. Warm tones and rich food colors are critical.',
+    defaultColorGrade:'warm',
+    defaultBgHint:'professional kitchen backdrop, warm ambient lighting, fresh colorful ingredients, steam rising from dish, vibrant food colors, no people',
+    ctrWeights:{ face_prominence:0.9, text_readability:1.1, color_contrast:1.1, emotional_intensity:1.0, composition:1.2, niche_relevance:1.3 },
+  },
+  fitness: {
+    label:'Fitness', emoji:'💪',
+    promptContext:'YouTube fitness and workout channel. Audience responds to transformation results, intense training moments, aspirational physique goals, and motivational high-contrast imagery. Dramatic lighting and strong silhouettes work well.',
+    defaultColorGrade:'cinematic',
+    defaultBgHint:'modern gym backdrop, dramatic directional lighting, barbells and equipment, motivational atmosphere, strong contrast, no people',
+    ctrWeights:{ face_prominence:1.2, text_readability:1.0, color_contrast:1.1, emotional_intensity:1.3, composition:1.0, niche_relevance:1.2 },
+  },
+  education: {
+    label:'Education', emoji:'📚',
+    promptContext:'YouTube educational and explainer channel. Audience values trustworthiness, clarity, immediate understanding of what they will learn, and credibility signals. Clean compositions with clear visual hierarchy outperform busy designs.',
+    defaultColorGrade:'default',
+    defaultBgHint:'clean academic setting, soft natural light, organized desk workspace, professional atmosphere, subtle books or whiteboards, no people',
+    ctrWeights:{ face_prominence:1.0, text_readability:1.4, color_contrast:1.0, emotional_intensity:0.8, composition:1.2, niche_relevance:1.2 },
+  },
+};
+
+function getUserNiche(email){
+  const users=loadUsers();
+  return users[email]?.niche||null;
+}
+
+function getNicheProfile(email){
+  const niche=getUserNiche(email);
+  return niche ? {niche, profile:NICHE_PROFILES[niche]||null} : {niche:null, profile:null};
+}
+
+// ── Niche Set/Get Endpoints ───────────────────────────────────────────────────
+app.get('/api/get-niche', authMiddleware, (req,res)=>{
+  const {niche,profile}=getNicheProfile(req.user.email);
+  res.json({success:true, niche, profile, nicheSet:!!niche});
+});
+
+app.post('/api/set-niche', authMiddleware, (req,res)=>{
+  const {niche}=req.body;
+  if(!niche||!NICHE_PROFILES[niche]){
+    return res.status(400).json({success:false,error:'Invalid niche. Must be one of: '+Object.keys(NICHE_PROFILES).join(', '),code:'INVALID_INPUT'});
+  }
+  const users=loadUsers();
+  if(!users[req.user.email]) return res.status(404).json({success:false,error:'User not found',code:'NOT_FOUND'});
+  users[req.user.email].niche=niche;
+  saveUsers(users);
+  console.log(`[NICHE] ${req.user.email} set niche to "${niche}"`);
+  res.json({success:true, niche, profile:NICHE_PROFILES[niche]});
+});
+
+// ── AI Text Engine — Claude Vision API ────────────────────────────────────────
+app.post('/api/generate-text', authMiddleware, async(req,res)=>{
+  try{
+    const{title,niche,image}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok){
+      return res.status(429).json({success:false,error:quota.message,code:quota.code});
+    }
+
+    const[,rest]=image.split(',');
+    const media_type=image.startsWith('data:image/png')?'image/png':'image/jpeg';
+
+    // Niche context injection — Feature J
+    const {niche:storedNiche,profile:nicheProfile}=getNicheProfile(req.user.email);
+    const effectiveNiche=niche||storedNiche||'general';
+    const nicheCtx=nicheProfile?`\nChannel context: ${nicheProfile.promptContext}`:'';
+
+    const prompt=`You are a YouTube thumbnail headline expert. Analyze this thumbnail${title?` for a video titled "${title}"`:''}${effectiveNiche&&effectiveNiche!=='general'?` in the ${effectiveNiche} niche`:''}${nicheCtx}.
+
+Generate 5 punchy, click-worthy text overlays calibrated to this niche. For each, analyze the image to find the best high-contrast placement zone — avoid faces, busy detail areas, and any text already visible.
+
+Return ONLY a valid JSON array — no markdown, no extra text — in exactly this shape:
+[
+  {
+    "text": "<max 4 words, ALL CAPS, punchy and niche-specific>",
+    "x": <0-100, percent from left edge of image>,
+    "y": <0-100, percent from top edge of image>,
+    "color": "<'light' or 'dark' — which gives better contrast at this zone>",
+    "strokeWidth": <0-12 integer — heavier for busier backgrounds>,
+    "fontFamily": "<'Anton' or 'Bebas Neue' or 'Oswald'>",
+    "fontSize": <36-80 integer, relative to 1280x720 canvas>
+  }
+]
+
+Rules:
+- text: ALL CAPS always, max 4 words, high-energy click-bait phrasing for the niche, never generic
+- x/y: exact percent positions identifying a clean region of the actual image
+- color: 'light' = white text on dark zone, 'dark' = dark text on light zone
+- strokeWidth: 0 for very clean zones, 4-6 for medium, 8-12 for busy
+- fontFamily: Anton for blocky bold MrBeast energy, Bebas Neue for sleek cinematic, Oswald for clean editorial
+- fontSize: 60-80 for 1-2 word punchy phrases, 42-58 for 3-4 word phrases
+- Vary positions across the 5 options — top, bottom, left, right, corners — so they suit different layouts
+- Make each text option meaningfully different in wording and energy level
+Output only the JSON array.`;
+
+    console.log(`[AITEXT] Generating headlines for ${req.user.email}${title?` — "${title}"`:''}${niche?` [${niche}]`:''}`);
+    const response=await anthropic.messages.create({
+      model:'claude-opus-4-20250514',
+      max_tokens:800,
+      messages:[{
+        role:'user',
+        content:[
+          {type:'image',source:{type:'base64',media_type,data:rest}},
+          {type:'text',text:prompt},
+        ],
+      }],
+    });
+
+    const raw=response.content[0]?.text?.trim()||'';
+    let options;
+    try{
+      const start=raw.indexOf('[');
+      const end=raw.lastIndexOf(']');
+      options=JSON.parse(raw.slice(start,end+1));
+    }catch(e){
+      console.error('[AITEXT] JSON parse failed:',raw.slice(0,300));
+      throw new Error('Could not parse Claude response as JSON');
+    }
+
+    // Sanitize each option
+    options=options.slice(0,5).map(o=>({
+      text:   String(o.text||'HEADLINE').toUpperCase().slice(0,40),
+      x:      Math.max(0,Math.min(100,Number(o.x)||10)),
+      y:      Math.max(0,Math.min(100,Number(o.y)||10)),
+      color:  o.color==='dark'?'dark':'light',
+      strokeWidth: Math.max(0,Math.min(12,Math.round(Number(o.strokeWidth)||0))),
+      fontFamily: ['Anton','Bebas Neue','Oswald'].includes(o.fontFamily)?o.fontFamily:'Anton',
+      fontSize:   Math.max(36,Math.min(80,Math.round(Number(o.fontSize)||60))),
+    }));
+
+    res.json({success:true,options,remaining:quota.remaining});
+  }catch(err){
+    console.error('[AITEXT] Error:',err.message);
+    res.status(500).json({success:false,error:`Text generation failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── Composition AI — Claude Vision API ────────────────────────────────────────
+app.post('/api/analyze-composition', authMiddleware, async(req,res)=>{
+  try{
+    const{image,title}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok){
+      return res.status(429).json({success:false,error:quota.message,code:quota.code});
+    }
+
+    const[,rest]=image.split(',');
+    const media_type=image.startsWith('data:image/png')?'image/png':'image/jpeg';
+
+    // Niche context injection — Feature J
+    const {niche:userNicheComp,profile:nicheProfileComp}=getNicheProfile(req.user.email);
+    const nicheCtxComp=nicheProfileComp?` This is a ${nicheProfileComp.label} channel. ${nicheProfileComp.promptContext}`:'';
+
+    const prompt=`You are a YouTube thumbnail composition expert. Analyze this thumbnail${title?` for the video titled "${title}"`:''}${nicheCtxComp}.\n\nReturn ONLY valid JSON — no markdown, no explanation — in exactly this shape:\n{\n  "score": <integer 1-10>,\n  "face_placement": "<one sentence tip about face/subject positioning, or null if no face>",\n  "negative_space": "<one sentence assessment of empty/breathing room>",\n  "focal_point": "<one sentence about what the eye is drawn to first>",\n  "text_zones": [\n    {"label":"<short label>","x":<0-100 pct from left>,"y":<0-100 pct from top>,"w":<width pct>,"h":<height pct>}\n  ],\n  "crop_suggestion": {"x":<pct>,"y":<pct>,"w":<pct>,"h":<pct>},\n  "issues": [\n    "<actionable issue string>"\n  ]\n}\n\nRules:\n- score: 1=terrible, 10=perfect click-worthy composition\n- text_zones: mark 1-3 areas where text could go or already is (avoid busy regions, favour top/bottom thirds or beside subject). x/y/w/h in percent of image dimensions.\n- crop_suggestion: tightest crop that keeps the most important visual elements. If the full frame is already optimal, return {x:0,y:0,w:100,h:100}.\n- issues: 2-5 short, actionable problems. Example issues: "Subject is centered — move left to create tension", "Text clashes with background", "Too much dead space in bottom third", "Face is too small — zoom in", "Bright corner competes with subject".\n- Be honest and specific. Output only the JSON object.`;
+
+    console.log(`[COMP] Analyzing composition for ${req.user.email}${title?` — "${title}"`:''}`)
+    const response=await anthropic.messages.create({
+      model:'claude-opus-4-20250514',
+      max_tokens:900,
+      messages:[{
+        role:'user',
+        content:[
+          {type:'image',source:{type:'base64',media_type,data:rest}},
+          {type:'text',text:prompt},
+        ],
+      }],
+    });
+
+    const raw=response.content[0]?.text?.trim()||'';
+    let parsed;
+    try{
+      const jsonStart=raw.indexOf('{');
+      const jsonEnd=raw.lastIndexOf('}');
+      parsed=JSON.parse(raw.slice(jsonStart,jsonEnd+1));
+    }catch(e){
+      console.error('[COMP] JSON parse failed:',raw.slice(0,200));
+      throw new Error('Could not parse Claude response as JSON');
+    }
+
+    const score=Math.max(1,Math.min(10,Math.round(Number(parsed.score)||5)));
+    res.json({
+      success:true,
+      score,
+      face_placement:parsed.face_placement||null,
+      negative_space:parsed.negative_space||null,
+      focal_point:parsed.focal_point||null,
+      text_zones:Array.isArray(parsed.text_zones)?parsed.text_zones:[],
+      crop_suggestion:parsed.crop_suggestion||{x:0,y:0,w:100,h:100},
+      issues:Array.isArray(parsed.issues)?parsed.issues:[],
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[COMP] Error:',err.message);
+    res.status(500).json({success:false,error:`Composition analysis failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── CTR Prediction Score v2 — Claude Vision API ───────────────────────────────
+app.post('/api/ctr-score-v2', authMiddleware, async(req,res)=>{
+  try{
+    const{image,title,niche}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    const[,imgBase64]=image.split(',');
+    const media_type=image.startsWith('data:image/png')?'image/png':'image/jpeg';
+
+    // Niche context + weight injection — Feature J
+    const {niche:storedNicheCtr,profile:nicheProfileCtr}=getNicheProfile(req.user.email);
+    const effectiveNicheCtr=niche||storedNicheCtr||'general';
+    const nicheCtxCtr=nicheProfileCtr?`\n\nChannel context: This is a ${nicheProfileCtr.label} channel. ${nicheProfileCtr.promptContext}\nWeight these categories accordingly for this niche when scoring — a gaming thumbnail doesn't need perfect composition if the energy is extreme, while an education thumbnail must have outstanding text readability.`:'';
+
+    const prompt=`You are a YouTube CTR expert with deep knowledge of what makes thumbnails click-worthy. Analyze this thumbnail${title?` for a video titled "${title}"`:''}${effectiveNicheCtr&&effectiveNicheCtr!=='general'?` in the ${effectiveNicheCtr} niche`:''}${nicheCtxCtr}.
+
+Return ONLY valid JSON — no preamble, no markdown, no explanation — in this exact shape:
+{
+  "overall": <integer 0-100, overall CTR potential>,
+  "predicted_ctr_low": <float, realistic lower-bound CTR % for YouTube, e.g. 3.5>,
+  "predicted_ctr_high": <float, realistic upper-bound CTR %, e.g. 7.2>,
+  "industry_avg": <float, typical CTR % for ${effectiveNicheCtr||'YouTube'} thumbnails, e.g. 3.1>,
+  "categories": {
+    "face_prominence":    { "score": <0-20>, "max": 20, "tip": "<specific tip referencing what you see>" },
+    "text_readability":   { "score": <0-20>, "max": 20, "tip": "<specific tip referencing what you see>" },
+    "color_contrast":     { "score": <0-15>, "max": 15, "tip": "<specific tip referencing what you see>" },
+    "emotional_intensity":{ "score": <0-15>, "max": 15, "tip": "<specific tip referencing what you see>" },
+    "composition":        { "score": <0-15>, "max": 15, "tip": "<specific tip referencing what you see>" },
+    "niche_relevance":    { "score": <0-15>, "max": 15, "tip": "<specific tip referencing what you see>" }
+  },
+  "issues": ["<2-4 specific issues that hurt CTR — be concrete, reference what you see>"],
+  "wins":   ["<1-3 things already working well — be specific>"]
+}
+
+Scoring rubric:
+- face_prominence (0-20): Clear human face? Emotion visible at small size? Face large in frame?
+- text_readability (0-20): Text large, bold, high-contrast, visible at 180×101px mobile size?
+- color_contrast (0-15): Strong light/dark separation? Vivid, saturated colors? Stands out in a grid?
+- emotional_intensity (0-15): Strong emotion, curiosity gap, or surprise conveyed?
+- composition (0-15): Clear focal point? Rule of thirds? Not cluttered? Hierarchy obvious?
+- niche_relevance (0-15): Does it immediately signal the topic to the target audience?
+
+CTR benchmarks: avg YouTube 2-5%, good thumbnail 5-10%, excellent 10-15%.
+Be honest, specific, and reference exactly what you observe in this image. Output only the JSON object.`;
+
+    console.log(`[CTRV2] Scoring for ${req.user.email}${title?` — "${title}"`:''}${niche?` [${niche}]`:''}`);
+    const response=await anthropic.messages.create({
+      model:'claude-opus-4-20250514',
+      max_tokens:900,
+      messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type,data:imgBase64}},
+        {type:'text',text:prompt},
+      ]}],
+    });
+
+    const raw=response.content[0]?.text?.trim()||'';
+    let parsed;
+    try{
+      const s=raw.indexOf('{'), e=raw.lastIndexOf('}');
+      parsed=JSON.parse(raw.slice(s,e+1));
+    }catch(err){
+      console.error('[CTRV2] Parse failed:',raw.slice(0,200));
+      throw new Error('Could not parse Claude response as JSON');
+    }
+
+    // Sanitize — apply niche weight adjustments — Feature J
+    const cats=parsed.categories||{};
+    const nw=nicheProfileCtr?.ctrWeights||{};
+    const sanitizeCat=(key,max)=>{
+      const raw=Math.max(0,Math.min(max,Math.round(Number(cats[key]?.score)||0)));
+      const weight=nw[key]||1.0;
+      const weighted=Math.max(0,Math.min(max,Math.round(raw*weight)));
+      return{score:weighted, max, tip:String(cats[key]?.tip||'No tip available.').slice(0,200)};
+    };
+    // Recompute overall from weighted categories
+    const weightedTotal=
+      sanitizeCat('face_prominence',20).score+sanitizeCat('text_readability',20).score+
+      sanitizeCat('color_contrast',15).score+sanitizeCat('emotional_intensity',15).score+
+      sanitizeCat('composition',15).score+sanitizeCat('niche_relevance',15).score;
+    const maxTotal=100;
+    const weightedOverall=Math.round((weightedTotal/maxTotal)*100);
+
+    res.json({
+      success:true,
+      overall:    Math.max(0,Math.min(100,nicheProfileCtr?weightedOverall:Math.round(Number(parsed.overall)||50))),
+      predicted_ctr_low:  Math.round(Number(parsed.predicted_ctr_low||2)*10)/10,
+      predicted_ctr_high: Math.round(Number(parsed.predicted_ctr_high||5)*10)/10,
+      industry_avg:       Math.round(Number(parsed.industry_avg||3)*10)/10,
+      categories:{
+        face_prominence:    sanitizeCat('face_prominence',20),
+        text_readability:   sanitizeCat('text_readability',20),
+        color_contrast:     sanitizeCat('color_contrast',15),
+        emotional_intensity:sanitizeCat('emotional_intensity',15),
+        composition:        sanitizeCat('composition',15),
+        niche_relevance:    sanitizeCat('niche_relevance',15),
+      },
+      issues: Array.isArray(parsed.issues)?parsed.issues.slice(0,5).map(s=>String(s).slice(0,120)):[],
+      wins:   Array.isArray(parsed.wins)?parsed.wins.slice(0,4).map(s=>String(s).slice(0,120)):[],
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[CTRV2] Error:',err.message);
+    res.status(500).json({success:false,error:`CTR analysis failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── Auto Color Grade & Pop — Sharp pipelines ──────────────────────────────────
+const COLOR_GRADE_PRESETS = {
+  default: {
+    gamma:    1.05,
+    linear:   [1.15, -18],
+    modulate: {brightness:1.04, saturation:1.28, hue:0},
+    recomb:   null,
+  },
+  warm: {
+    gamma:    1.10,
+    linear:   [1.10, -10],
+    modulate: {brightness:1.07, saturation:1.22, hue:10},
+    recomb:   [[1.07,0.02,-0.04],[0.01,1.01,-0.01],[-0.05,0.01,0.94]],
+  },
+  cool: {
+    gamma:    0.88,
+    linear:   [1.28, -28],
+    modulate: {brightness:0.97, saturation:1.18, hue:-14},
+    recomb:   [[0.91,0.03,0.05],[0.01,1.00,0.02],[0.03,0.03,1.09]],
+  },
+  cinematic: {
+    gamma:    0.82,
+    linear:   [1.18, -22],
+    modulate: {brightness:1.05, saturation:0.82, hue:-5},
+    recomb:   [[1.03,-0.02,0.04],[0.00,0.97,0.01],[-0.04,0.06,1.04]],
+  },
+  neon: {
+    gamma:    1.0,
+    linear:   [1.14, -20],
+    modulate: {brightness:1.01, saturation:1.80, hue:6},
+    recomb:   [[1.06,-0.02,0.04],[-0.01,1.04,-0.01],[0.04,-0.02,1.09]],
+  },
+};
+
+async function runColorGradePipeline(imageBuf, presetName, intensity){
+  const pr=COLOR_GRADE_PRESETS[presetName]||COLOR_GRADE_PRESETS.default;
+  const t=Math.max(0,Math.min(100,intensity))/100;
+
+  // Lerp all params from neutral (identity) → full preset at t=1
+  const gamma=1+(pr.gamma-1)*t;
+  const [linA,linB]=pr.linear;
+  const cA=1+(linA-1)*t;
+  const cB=linB*t;
+  const bMod=1+(pr.modulate.brightness-1)*t;
+  const sMod=1+(pr.modulate.saturation-1)*t;
+  const hMod=Math.round(pr.modulate.hue*t);
+
+  let pipeline=sharp(imageBuf);
+
+  // Gamma (S-curve shadow/highlight shaping)
+  if(Math.abs(gamma-1)>0.01) pipeline=pipeline.gamma(Math.max(0.3,Math.min(3.0,gamma)));
+
+  // Levels (contrast + black point crush)
+  pipeline=pipeline.linear(Math.max(0.4,Math.min(2.5,cA)),Math.round(cB));
+
+  // Vibrance (saturation with colour bias via modulate)
+  pipeline=pipeline.modulate({
+    brightness:Math.max(0.5,Math.min(2.0,bMod)),
+    saturation:Math.max(0.1,Math.min(3.5,sMod)),
+    hue:hMod,
+  });
+
+  // Unsharp mask — only when intensity is meaningful
+  if(t>0.15){
+    pipeline=pipeline.sharpen({sigma:1.5, m1:0.5*t, m2:0.7*t});
+  }
+
+  // Colour matrix (warm/cool/cinematic tint)
+  if(pr.recomb&&t>0.05){
+    const id=[[1,0,0],[0,1,0],[0,0,1]];
+    const lm=pr.recomb.map((row,i)=>row.map((v,j)=>id[i][j]+(v-id[i][j])*t));
+    pipeline=pipeline.recomb(lm);
+  }
+
+  return pipeline.jpeg({quality:94}).toBuffer();
+}
+
+app.post('/api/color-grade', authMiddleware, async(req,res)=>{
+  try{
+    const{image,preset='default',intensity=80}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+    if(!COLOR_GRADE_PRESETS[preset]){
+      return res.status(400).json({success:false,error:`Unknown preset: ${preset}`,code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    const[,imgBase64]=image.split(',');
+    const imageBuf=Buffer.from(imgBase64,'base64');
+
+    console.log(`[COLORGRADE] ${preset} @ ${intensity}% for ${req.user.email}`);
+    const outBuf=await runColorGradePipeline(imageBuf,preset,intensity);
+
+    res.json({
+      success:true,
+      image:`data:image/jpeg;base64,${outBuf.toString('base64')}`,
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[COLORGRADE] Error:',err.message);
+    res.status(500).json({success:false,error:`Color grade failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── AI Background Generation & Swap ───────────────────────────────────────────
+const NICHE_BG_PROMPTS = {
+  gaming:    'neon-lit gaming arena with particle effects, dark atmospheric bokeh, dramatic RGB lighting, no people, no text',
+  vlog:      'clean soft lifestyle background, warm bokeh, bright and airy, natural window light, minimal, no people, no text',
+  tech:      'dark minimal workspace background, subtle circuit texture, cool-toned depth of field, dark background, no people, no text',
+  cooking:   'warm kitchen bokeh background, soft natural light, steam atmosphere, wood and marble surfaces, cozy, no people, no text',
+  fitness:   'gym with dramatic lighting, high contrast, motivational dark energy, weight equipment, no people, no text',
+  education: 'clean bright whiteboard aesthetic, soft academic warmth, library shelves, open airy light, no people, no text',
+};
+
+app.post('/api/generate-background', authMiddleware, async(req,res)=>{
+  try{
+    const{niche,customPrompt,subject,intensity=100}=req.body;
+    if(!niche&&!customPrompt){
+      return res.status(400).json({success:false,error:'Provide a niche or custom prompt',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    // Niche context injection — Feature J: use stored niche hint when no explicit niche provided
+    const {profile:bgNicheProfile}=getNicheProfile(req.user.email);
+    const nicheBase=NICHE_BG_PROMPTS[niche]||(bgNicheProfile?.defaultBgHint)||'';
+    const custom=customPrompt?.trim()||'';
+    const fullPrompt=`YouTube thumbnail background: ${[nicheBase,custom].filter(Boolean).join(', ')}. Cinematic, high quality, no watermarks, no logos, no text overlays, no UI elements.`;
+
+    console.log(`[BGGEN] Generating for ${req.user.email} — niche: ${niche||'stored'||'custom'}`);
+    const aiRes=await openai.images.generate({
+      model:'dall-e-3',
+      prompt:fullPrompt,
+      n:1,
+      size:'1792x1024',
+      quality:'standard',
+      style:'vivid',
+    });
+
+    const imageUrl=aiRes.data[0].url;
+    const imgFetch=await fetch(imageUrl);
+    let bgBuf=Buffer.from(await imgFetch.arrayBuffer());
+
+    // Resize to YouTube thumbnail dimensions
+    bgBuf=await sharp(bgBuf).resize(1280,720,{fit:'cover'}).jpeg({quality:93}).toBuffer();
+
+    let finalBuf=bgBuf;
+
+    // ── Composite subject if provided ──────────────────────────────────────
+    if(subject&&subject.startsWith('data:image/')){
+      const[,subBase64]=subject.split(',');
+      const subBuf=Buffer.from(subBase64,'base64');
+
+      // Analyse background warmth for lighting temperature match
+      const bgStats=await sharp(bgBuf).stats();
+      const[bgR,bgG,bgB]=bgStats.channels;
+      const bgWarmth=(bgR.mean-bgB.mean)/255;
+      const hueShift=Math.round(bgWarmth*18);
+
+      // Feather edges: slight blur softens the mask boundary
+      const featheredSubject=await sharp(subBuf)
+        .ensureAlpha()
+        .modulate({hue:hueShift})          // match lighting temperature
+        .blur(0.8)                          // edge feathering
+        .toBuffer();
+
+      // Get subject dimensions to position it (right-center, natural thumbnail placement)
+      const subMeta=await sharp(featheredSubject).metadata();
+      const scale=Math.min(1,720/(subMeta.height||720));
+      const scaledW=Math.round((subMeta.width||400)*scale);
+      const scaledH=Math.round((subMeta.height||720)*scale);
+      const resizedSubject=await sharp(featheredSubject)
+        .resize(scaledW,scaledH,{fit:'contain',background:{r:0,g:0,b:0,alpha:0}})
+        .toBuffer();
+
+      // Composite: left-of-center, bottom-anchored
+      const left=Math.round(1280*0.05);
+      const top=720-scaledH;
+      finalBuf=await sharp(bgBuf)
+        .composite([{input:resizedSubject,blend:'over',left:Math.max(0,left),top:Math.max(0,top)}])
+        .jpeg({quality:93})
+        .toBuffer();
+    }
+
+    res.json({
+      success:true,
+      image:`data:image/jpeg;base64,${finalBuf.toString('base64')}`,
+      prompt:fullPrompt,
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[BGGEN] Error:',err.message);
+    res.status(500).json({success:false,error:`Background generation failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── Style Transfer — Sharp image processing ────────────────────────────────────
+const STYLE_PRESETS = {
+  mrbeast: {
+    label:'MrBeast', mood:'Punchy & Viral',
+    colors:['#f97316','#facc15','#ef4444','#22c55e','#0ea5e9'],
+    modulate:{brightness:1.18,saturation:1.55,hue:8},
+    linear:[1.28,-22],
+  },
+  mkbhd: {
+    label:'MKBHD', mood:'Clean & Minimal',
+    colors:['#0a0a0a','#18181b','#1d4ed8','#60a5fa','#f1f5f9'],
+    modulate:{brightness:1.04,saturation:0.78,hue:-6},
+    linear:[1.32,-18],
+  },
+  veritasium: {
+    label:'Veritasium', mood:'Natural & Engaging',
+    colors:['#1a3d2b','#2d6a4f','#52b788','#f4a261','#fefae0'],
+    modulate:{brightness:1.06,saturation:1.18,hue:5},
+    linear:[1.14,-8],
+  },
+  linus: {
+    label:'Linus Tech Tips', mood:'Bright & Direct',
+    colors:['#f8fafc','#e2e8f0','#3b82f6','#1d4ed8','#fbbf24'],
+    modulate:{brightness:1.24,saturation:1.08,hue:0},
+    linear:[1.08,-4],
+  },
+  markrober: {
+    label:'Mark Rober', mood:'Vibrant & Bold',
+    colors:['#1d4ed8','#ef4444','#f59e0b','#10b981','#7c3aed'],
+    modulate:{brightness:1.10,saturation:1.42,hue:3},
+    linear:[1.22,-14],
+  },
+};
+
+function isSafeUrl(u){
+  try{
+    const p=new URL(u);
+    if(p.protocol!=='https:') return false;
+    const h=p.hostname.toLowerCase();
+    if(['localhost','127.0.0.1','0.0.0.0','::1'].includes(h)) return false;
+    if(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)) return false;
+    if(h.endsWith('.local')||h.endsWith('.internal')||h.endsWith('.localdomain')) return false;
+    return true;
+  }catch{return false;}
+}
+
+function getDominantColors(rawData, count){
+  const freq={};
+  for(let i=0;i<rawData.length;i+=3){
+    const r=Math.round(rawData[i]/32)*32;
+    const g=Math.round(rawData[i+1]/32)*32;
+    const b=Math.round(rawData[i+2]/32)*32;
+    const key=`${r},${g},${b}`;
+    freq[key]=(freq[key]||0)+1;
+  }
+  return Object.entries(freq)
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0,count)
+    .map(([k])=>{
+      const [r,g,b]=k.split(',').map(Number);
+      return '#'+[r,g,b].map(v=>Math.min(255,v).toString(16).padStart(2,'0')).join('');
+    });
+}
+
+async function extractStyleMeta(buf){
+  const stats=await sharp(buf).stats();
+  const[rS,gS,bS]=stats.channels;
+  const brightness=(0.299*rS.mean+0.587*gS.mean+0.114*bS.mean)/255;
+  const maxCh=Math.max(rS.mean,gS.mean,bS.mean);
+  const minCh=Math.min(rS.mean,gS.mean,bS.mean);
+  const saturation=maxCh>8?(maxCh-minCh)/maxCh:0;
+  const contrast=(rS.stdev+gS.stdev+bS.stdev)/(3*255);
+  const warmth=(rS.mean-bS.mean)/255;
+
+  const {data}=await sharp(buf).resize(60,60).removeAlpha().raw().toBuffer({resolveWithObject:true});
+  const colors=getDominantColors(data,5);
+
+  let mood;
+  if(brightness>0.62) mood=saturation>0.35?'Vivid & Bright':'Clean & Airy';
+  else if(brightness<0.38) mood=saturation>0.28?'Dark & Moody':'Cinematic Dark';
+  else mood=warmth>0.08?'Warm & Energetic':warmth<-0.08?'Cool & Minimal':'Natural & Balanced';
+
+  return{brightness,saturation,contrast,warmth,colors,mood};
+}
+
+async function applyStylePipeline(imageBuf, modulate, linear, intensity){
+  const t=Math.max(0,Math.min(100,intensity))/100;
+  const bMod=1+(modulate.brightness-1)*t;
+  const sMod=1+(modulate.saturation-1)*t;
+  const hMod=(modulate.hue||0)*t;
+  const [linA,linB]=linear;
+  const cA=1+(linA-1)*t;
+  const cB=linB*t;
+  return sharp(imageBuf)
+    .modulate({brightness:Math.max(0.4,Math.min(2.5,bMod)),saturation:Math.max(0.1,Math.min(3.5,sMod)),hue:hMod})
+    .linear(Math.max(0.4,Math.min(2.5,cA)),Math.round(cB))
+    .jpeg({quality:93})
+    .toBuffer();
+}
+
+app.post('/api/style-transfer', authMiddleware, async(req,res)=>{
+  try{
+    const{image,preset,referenceUrl,intensity=75}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+    if(!preset&&!referenceUrl){
+      return res.status(400).json({success:false,error:'Provide a preset name or referenceUrl',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    const[,imgBase64]=image.split(',');
+    const imageBuf=Buffer.from(imgBase64,'base64');
+
+    let styleMeta, processedBuf;
+
+    if(preset){
+      // ── Preset mode ────────────────────────────────────────────────────
+      const p=STYLE_PRESETS[preset];
+      if(!p) return res.status(400).json({success:false,error:`Unknown preset: ${preset}`,code:'INVALID_INPUT'});
+
+      processedBuf=await applyStylePipeline(imageBuf,p.modulate,p.linear,intensity);
+      styleMeta={colors:p.colors,mood:p.mood,brightness:p.modulate.brightness,contrast:p.linear[0],saturation:p.modulate.saturation};
+      console.log(`[STYLE] Preset "${preset}" applied for ${req.user.email} at intensity ${intensity}%`);
+    } else {
+      // ── URL mode ───────────────────────────────────────────────────────
+      if(!isSafeUrl(referenceUrl)){
+        return res.status(400).json({success:false,error:'Invalid or unsafe reference URL',code:'INVALID_INPUT'});
+      }
+      const refRes=await fetch(referenceUrl,{headers:{'User-Agent':'ThumbFrame/1.0'},timeout:8000});
+      if(!refRes.ok) throw new Error(`Failed to fetch reference: ${refRes.status}`);
+      const contentType=refRes.headers.get('content-type')||'';
+      if(!contentType.startsWith('image/')) throw new Error('Reference URL is not an image');
+      const refBuf=Buffer.from(await refRes.arrayBuffer());
+
+      const meta=await extractStyleMeta(refBuf);
+
+      // Convert extracted meta to pipeline params
+      const brightnessMod=Math.max(0.6,Math.min(1.8,0.7+meta.brightness*0.8));
+      const satMod=Math.max(0.4,Math.min(2.2,0.5+meta.saturation*1.8));
+      const contrastA=Math.max(0.8,Math.min(1.8,1.0+meta.contrast*1.5));
+      const contrastB=Math.round(-(60*meta.contrast));
+      const hue=Math.round(meta.warmth*28);
+
+      processedBuf=await applyStylePipeline(imageBuf,{brightness:brightnessMod,saturation:satMod,hue},[contrastA,contrastB],intensity);
+      styleMeta={colors:meta.colors,mood:meta.mood,brightness:meta.brightness,contrast:meta.contrast,saturation:meta.saturation};
+      console.log(`[STYLE] URL extraction applied for ${req.user.email} — mood: ${meta.mood}`);
+    }
+
+    res.json({
+      success:true,
+      processedImage:`data:image/jpeg;base64,${processedBuf.toString('base64')}`,
+      style:styleMeta,
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[STYLE] Error:',err.message);
+    res.status(500).json({success:false,error:`Style transfer failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── AI Variant Generator — Feature I ──────────────────────────────────────────
+// Accepts variantType 1-5, returns one {base64,label,description} per call.
+// Frontend calls all 5 in parallel for progressive card population.
+app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
+  try{
+    const{image,title='',niche='gaming',variantType}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+    const vt=parseInt(variantType,10);
+    if(!vt||vt<1||vt>5){
+      return res.status(400).json({success:false,error:'variantType must be 1–5',code:'INVALID_INPUT'});
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    // Niche context — Feature J: use stored niche, allow body override
+    const {niche:storedNicheVar,profile:nicheProfileVar}=getNicheProfile(req.user.email);
+    const effectiveNicheVar=niche||storedNicheVar||'gaming';
+    const nicheCtxVar=nicheProfileVar?nicheProfileVar.promptContext:'';
+
+    const[,imgBase64]=image.split(',');
+    const imageBuf=Buffer.from(imgBase64,'base64');
+    const meta=await sharp(imageBuf).metadata();
+    const W=meta.width||1280, H=meta.height||720;
+
+    let outBuf, label, description;
+
+    // ── Variant 1: Tight face crop (1.3×) + Default color grade ──────────────
+    if(vt===1){
+      const scale=1/1.3;
+      const cw=Math.round(W*scale), ch=Math.round(H*scale);
+      const cl=Math.round((W-cw)/2), ct=Math.round((H-ch)/2);
+      const cropped=await sharp(imageBuf)
+        .extract({left:Math.max(0,cl),top:Math.max(0,ct),width:Math.min(cw,W-cl),height:Math.min(ch,H-ct)})
+        .resize(1280,720,{fit:'cover',position:'centre'})
+        .jpeg({quality:93}).toBuffer();
+      outBuf=await runColorGradePipeline(cropped,'default',85);
+      label='Tight + Default';
+      description='Cropped 1.3× toward center, default color grade for clean punch';
+    }
+
+    // ── Variant 2: Wide shot (0.85×) + Warm color grade ──────────────────────
+    else if(vt===2){
+      const sw=Math.round(1280*0.85), sh=Math.round(720*0.85);
+      const pl=Math.round((1280-sw)/2), pt=Math.round((720-sh)/2);
+      const scaled=await sharp(imageBuf).resize(sw,sh,{fit:'fill'}).jpeg({quality:93}).toBuffer();
+      const canvas=await sharp({
+        create:{width:1280,height:720,channels:3,background:{r:8,g:8,b:12}},
+      }).composite([{input:scaled,left:pl,top:pt}]).jpeg({quality:93}).toBuffer();
+      outBuf=await runColorGradePipeline(canvas,'warm',85);
+      label='Wide + Warm';
+      description='Zoomed out 0.85× revealing context, warm color grade';
+    }
+
+    // ── Variant 3: Original crop + Cool grade + Claude headline ──────────────
+    else if(vt===3){
+      const graded=await runColorGradePipeline(imageBuf,'cool',82);
+      let headline=title?(title.toUpperCase().slice(0,36)):'WAIT FOR IT';
+      try{
+        const nicheHint=nicheCtxVar?` Channel type: ${effectiveNicheVar}. ${nicheCtxVar}`:'';
+        const aiRes=await anthropic.messages.create({
+          model:'claude-opus-4-5',max_tokens:60,
+          messages:[{role:'user',content:`Write 1 punchy YouTube thumbnail headline in ALL CAPS, max 5 words, no punctuation except !, for the video: "${title}".${nicheHint} Output the headline only, nothing else.`}],
+        });
+        const raw=aiRes.content[0]?.text?.trim().toUpperCase().replace(/['"]/g,'').slice(0,36);
+        if(raw) headline=raw;
+      }catch(e){/* use fallback */}
+      const safeText=headline.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><text x="56" y="660" font-size="88" font-family="Arial Black,Impact,sans-serif" font-weight="900" fill="#ffffff" stroke="#000000" stroke-width="7" stroke-linejoin="round" paint-order="stroke fill">${safeText}</text></svg>`;
+      outBuf=await sharp(graded).composite([{input:Buffer.from(svg),blend:'over'}]).jpeg({quality:93}).toBuffer();
+      label='Cool + New Text';
+      description=`Cool grade, AI headline: "${headline}"`;
+    }
+
+    // ── Variant 4: Original + Cinematic grade + text repositioned right ───────
+    else if(vt===4){
+      const graded=await runColorGradePipeline(imageBuf,'cinematic',82);
+      const safeText=(title||'WATCH THIS').toUpperCase().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,36);
+      const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><text x="1224" y="660" font-size="88" font-family="Arial Black,Impact,sans-serif" font-weight="900" text-anchor="end" fill="#ffffff" stroke="#000000" stroke-width="7" stroke-linejoin="round" paint-order="stroke fill">${safeText}</text></svg>`;
+      outBuf=await sharp(graded).composite([{input:Buffer.from(svg),blend:'over'}]).jpeg({quality:93}).toBuffer();
+      label='Cinematic + Right Text';
+      description='Cinematic grade, title anchor shifted to right side';
+    }
+
+    // ── Variant 5: Original + Neon grade + AI background swap ────────────────
+    else{
+      const graded=await runColorGradePipeline(imageBuf,'neon',80);
+      const nicheKey=(niche||'gaming').toLowerCase();
+      const nicheBase=NICHE_BG_PROMPTS[nicheKey]||NICHE_BG_PROMPTS.gaming;
+      const bgPrompt=`YouTube thumbnail background: ${nicheBase}. Cinematic, high quality, vibrant neon lighting, no watermarks, no logos, no text overlays.`;
+      console.log(`[VARIANTS] Variant 5 — generating neon+background for ${req.user.email}`);
+      const aiImg=await openai.images.generate({model:'dall-e-3',prompt:bgPrompt,n:1,size:'1792x1024',quality:'standard',style:'vivid'});
+      const bgUrl=aiImg.data[0].url;
+      const bgFetch=await fetch(bgUrl);
+      let bgBuf=Buffer.from(await bgFetch.arrayBuffer());
+      bgBuf=await sharp(bgBuf).resize(1280,720,{fit:'cover'}).jpeg({quality:93}).toBuffer();
+
+      // Crop right 60% of original (subject area) and composite over new background
+      const subjectLeft=Math.round(W*0.38);
+      const subjectW=W-subjectLeft;
+      const subjectCrop=await sharp(graded)
+        .extract({left:subjectLeft,top:0,width:subjectW,height:H})
+        .jpeg({quality:93}).toBuffer();
+      outBuf=await sharp(bgBuf)
+        .composite([{input:subjectCrop,left:1280-Math.round(1280*0.62),top:0,blend:'over'}])
+        .jpeg({quality:93}).toBuffer();
+      label='Neon + AI Background';
+      description=`Neon grade, AI-generated ${nicheKey} background swap`;
+    }
+
+    console.log(`[VARIANTS] type=${vt} "${label}" — generated for ${req.user.email}`);
+    res.json({
+      success:true,
+      variant:{
+        base64:`data:image/jpeg;base64,${outBuf.toString('base64')}`,
+        label,
+        description,
+      },
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[VARIANTS] Error:',err.message);
+    res.status(500).json({success:false,error:`Variant generation failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
+// ── Feature L: Team Collaboration & Brand Kit (Expanded) ──────────────────
+
+// Middleware: Agency plan required
+function agencyMiddleware(req,res,next){
+  const users=loadUsers();
+  const user=users[req.user?.email];
+  const isAgency=(user?.plan||'free').toLowerCase()==='agency'||user?.email==='kadengajkowski@gmail.com';
+  if(!isAgency) return res.status(403).json({success:false,error:'Agency plan required',code:'AGENCY_REQUIRED'});
+  next();
+}
+
+// POST /api/team/create
+app.post('/api/team/create', authMiddleware, agencyMiddleware, (req,res)=>{
+  const {name} = req.body;
+  if(!name?.trim()) return res.status(400).json({success:false,error:'Team name required'});
+  const teams=loadTeams();
+  const teamId=uuidv4();
+  teams[teamId]={
+    teamId, name:name.trim(),
+    owner:req.user.email,
+    members:[{email:req.user.email, role:'owner', joinedAt:Date.now()}],
+    projects:[],
+    createdAt:Date.now(),
+  };
+  saveTeams(teams);
+  // Store teamId on the user
+  const users=loadUsers();
+  if(users[req.user.email]) users[req.user.email].teamId=teamId;
+  saveUsers(users);
+  res.json({success:true, team:teams[teamId]});
+});
+
+// POST /api/team/invite
+app.post('/api/team/invite', authMiddleware, agencyMiddleware, async(req,res)=>{
+  const {teamId, inviteEmail} = req.body;
+  if(!teamId||!inviteEmail) return res.status(400).json({success:false,error:'teamId and inviteEmail required'});
+  const teams=loadTeams();
+  const team=teams[teamId];
+  if(!team) return res.status(404).json({success:false,error:'Team not found'});
+  if(team.owner!==req.user.email&&!team.members.find(m=>m.email===req.user.email&&m.role==='admin')){
+    return res.status(403).json({success:false,error:'Not authorized to invite'});
+  }
+  const inviteToken=uuidv4();
+  if(!team.pendingInvites) team.pendingInvites=[];
+  team.pendingInvites.push({email:inviteEmail, token:inviteToken, sentAt:Date.now()});
+  saveTeams(teams);
+
+  const frontendUrl=process.env.FRONTEND_URL||'https://www.thumbframe.com';
+  const inviteUrl=`${frontendUrl}?team_invite=${inviteToken}&team=${teamId}`;
+  try{
+    await resend.emails.send({
+      from:'ThumbFrame <noreply@thumbframe.com>',
+      to:inviteEmail,
+      subject:`You've been invited to join "${team.name}" on ThumbFrame`,
+      html:`<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0a0a0a;color:#fff;padding:32px;border-radius:12px">
+        <h2 style="color:#f97316;margin-top:0">Join ${team.name}</h2>
+        <p>${req.user.email} has invited you to collaborate on ThumbFrame.</p>
+        <a href="${inviteUrl}" style="display:inline-block;padding:12px 28px;background:#f97316;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;margin:16px 0">Accept Invite</a>
+        <p style="color:#666;font-size:12px">Link expires in 7 days.</p>
+      </div>`,
+    });
+  }catch(emailErr){
+    console.warn('[TEAM INVITE] Email send failed:',emailErr.message);
+    // Don't fail — invite token was saved, user can share link manually
+  }
+  res.json({success:true, inviteUrl, teamId});
+});
+
+// GET /api/team/join?token=xxx&teamId=xxx
+app.get('/api/team/join', authMiddleware, (req,res)=>{
+  const {token, teamId} = req.query;
+  if(!token||!teamId) return res.status(400).json({success:false,error:'Missing token or teamId'});
+  const teams=loadTeams();
+  const team=teams[teamId];
+  if(!team) return res.status(404).json({success:false,error:'Team not found'});
+  const invite=team.pendingInvites?.find(i=>i.token===token);
+  if(!invite) return res.status(403).json({success:false,error:'Invalid or expired invite'});
+  // Add member if not already in
+  const already=team.members.find(m=>m.email===req.user.email);
+  if(!already) team.members.push({email:req.user.email, role:'member', joinedAt:Date.now()});
+  // Remove invite
+  team.pendingInvites=team.pendingInvites.filter(i=>i.token!==token);
+  saveTeams(teams);
+  // Update user's teamId
+  const users=loadUsers();
+  if(users[req.user.email]) users[req.user.email].teamId=teamId;
+  saveUsers(users);
+  res.json({success:true, team});
+});
+
+// GET /api/team/me — get the user's current team
+app.get('/api/team/me', authMiddleware, (req,res)=>{
+  const users=loadUsers();
+  const teamId=users[req.user.email]?.teamId;
+  if(!teamId) return res.json({success:true, team:null});
+  const teams=loadTeams();
+  const team=teams[teamId]||null;
+  res.json({success:true, team});
+});
+
+// GET /api/team/projects
+app.get('/api/team/projects', authMiddleware, (req,res)=>{
+  const users=loadUsers();
+  const teamId=users[req.user.email]?.teamId;
+  if(!teamId) return res.json({success:true, projects:[]});
+  const designs=loadDesigns();
+  const teams=loadTeams();
+  const team=teams[teamId];
+  if(!team) return res.json({success:true, projects:[]});
+  const isMember=team.members.some(m=>m.email===req.user.email);
+  if(!isMember) return res.status(403).json({success:false,error:'Not a team member'});
+  const teamProjects=(team.projects||[]).map(pid=>designs[pid]).filter(Boolean);
+  res.json({success:true, projects:teamProjects, team});
+});
+
+// POST /api/team/share-project — add an existing project to the team workspace
+app.post('/api/team/share-project', authMiddleware, (req,res)=>{
+  const {teamId, projectId} = req.body;
+  if(!teamId||!projectId) return res.status(400).json({success:false,error:'teamId and projectId required'});
+  const teams=loadTeams();
+  const team=teams[teamId];
+  if(!team) return res.status(404).json({success:false,error:'Team not found'});
+  if(!team.projects.includes(projectId)) team.projects.push(projectId);
+  saveTeams(teams);
+  res.json({success:true});
+});
+
+// POST /api/comments/add
+app.post('/api/comments/add', authMiddleware, (req,res)=>{
+  const {projectId, x, y, text} = req.body;
+  if(!projectId||x==null||y==null||!text?.trim()) return res.status(400).json({success:false,error:'projectId, x, y, text required'});
+  const comments=loadComments();
+  if(!comments[projectId]) comments[projectId]=[];
+  const comment={
+    id:uuidv4(),
+    projectId,
+    userId:req.user.email,
+    x:parseFloat(x), y:parseFloat(y),
+    text:text.trim(),
+    timestamp:Date.now(),
+    resolved:false,
+    replies:[],
+  };
+  comments[projectId].push(comment);
+  saveComments(comments);
+  res.json({success:true, comment});
+});
+
+// GET /api/comments/:projectId
+app.get('/api/comments/:projectId', authMiddleware, (req,res)=>{
+  const comments=loadComments();
+  res.json({success:true, comments:comments[req.params.projectId]||[]});
+});
+
+// PATCH /api/comments/:commentId/resolve
+app.patch('/api/comments/:commentId/resolve', authMiddleware, (req,res)=>{
+  const comments=loadComments();
+  for(const projectId of Object.keys(comments)){
+    const idx=comments[projectId].findIndex(c=>c.id===req.params.commentId);
+    if(idx>=0){
+      comments[projectId][idx].resolved=!comments[projectId][idx].resolved;
+      saveComments(comments);
+      return res.json({success:true, comment:comments[projectId][idx]});
+    }
+  }
+  res.status(404).json({success:false,error:'Comment not found'});
+});
+
+// POST /api/comments/:commentId/reply
+app.post('/api/comments/:commentId/reply', authMiddleware, (req,res)=>{
+  const {text}=req.body;
+  if(!text?.trim()) return res.status(400).json({success:false,error:'text required'});
+  const comments=loadComments();
+  for(const projectId of Object.keys(comments)){
+    const idx=comments[projectId].findIndex(c=>c.id===req.params.commentId);
+    if(idx>=0){
+      const reply={id:uuidv4(), userId:req.user.email, text:text.trim(), timestamp:Date.now()};
+      comments[projectId][idx].replies.push(reply);
+      saveComments(comments);
+      return res.json({success:true, reply});
+    }
+  }
+  res.status(404).json({success:false,error:'Comment not found'});
+});
+
+// POST /api/projects/version — save a canvas snapshot
+app.post('/api/projects/version', authMiddleware, (req,res)=>{
+  const {projectId, label, canvasData} = req.body;
+  if(!projectId||!canvasData) return res.status(400).json({success:false,error:'projectId and canvasData required'});
+  const versions=loadVersions();
+  if(!versions[projectId]) versions[projectId]=[];
+  const version={
+    id:uuidv4(),
+    projectId,
+    label:label||`Version ${versions[projectId].length+1}`,
+    savedBy:req.user.email,
+    timestamp:Date.now(),
+    canvasData, // base64 or JSON snapshot
+  };
+  versions[projectId].push(version);
+  // Keep last 20 versions per project
+  if(versions[projectId].length>20) versions[projectId]=versions[projectId].slice(-20);
+  saveVersions(versions);
+  res.json({success:true, version:{...version, canvasData:undefined}}); // don't echo the big payload back
+});
+
+// GET /api/projects/:projectId/versions
+app.get('/api/projects/:projectId/versions', authMiddleware, (req,res)=>{
+  const versions=loadVersions();
+  const list=(versions[req.params.projectId]||[]).map(v=>({...v, canvasData:undefined}));
+  res.json({success:true, versions:list.reverse()}); // newest first
+});
+
+// GET /api/projects/:projectId/versions/:versionId — get full snapshot for restore
+app.get('/api/projects/:projectId/versions/:versionId', authMiddleware, (req,res)=>{
+  const versions=loadVersions();
+  const v=(versions[req.params.projectId]||[]).find(v=>v.id===req.params.versionId);
+  if(!v) return res.status(404).json({success:false,error:'Version not found'});
+  res.json({success:true, version:v});
+});
+
+// PATCH /api/projects/:projectId/status
+app.patch('/api/projects/:projectId/status', authMiddleware, (req,res)=>{
+  const {status} = req.body;
+  const VALID=['draft','review','approved'];
+  if(!VALID.includes(status)) return res.status(400).json({success:false,error:'status must be draft, review, or approved'});
+  const designs=loadDesigns();
+  if(!designs[req.params.projectId]) return res.status(404).json({success:false,error:'Project not found'});
+  designs[req.params.projectId].status=status;
+  designs[req.params.projectId].statusUpdatedAt=Date.now();
+  designs[req.params.projectId].statusUpdatedBy=req.user.email;
+  saveDesigns(designs);
+  res.json({success:true, status, projectId:req.params.projectId});
+});
+
+// ── Feature K: YouTube History Intelligence ────────────────────────────────
+
+const {google} = require('googleapis');
+
+function getOAuth2Client(){
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI || 'https://thumbframe-api-production.up.railway.app/api/youtube/callback'
+  );
+}
+
+// GET /api/youtube/auth — generate consent URL and redirect
+app.get('/api/youtube/auth', authMiddleware, (req,res)=>{
+  const oauth2 = getOAuth2Client();
+  const url = oauth2.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: [
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/yt-analytics.readonly',
+    ],
+    state: req.user.email, // pass email through so callback knows who to update
+  });
+  res.json({success:true, url});
+});
+
+// GET /api/youtube/callback — handle OAuth callback, store tokens
+app.get('/api/youtube/callback', async(req,res)=>{
+  const {code, state:email} = req.query;
+  if(!code||!email) return res.status(400).send('Missing code or state');
+  try{
+    const oauth2 = getOAuth2Client();
+    const {tokens} = await oauth2.getToken(code);
+    const users = loadUsers();
+    if(!users[email]) return res.status(404).send('User not found');
+    users[email].ytTokens = tokens;
+    saveUsers(users);
+    // Redirect back to frontend with success flag
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.thumbframe.com';
+    res.redirect(`${frontendUrl}?yt_connected=1`);
+  }catch(err){
+    console.error('[YT CALLBACK] Error:',err.message);
+    res.status(500).send('OAuth failed: '+err.message);
+  }
+});
+
+// GET /api/youtube/thumbnails — fetch last 50 videos with stats
+app.get('/api/youtube/thumbnails', authMiddleware, async(req,res)=>{
+  const users = loadUsers();
+  const user  = users[req.user.email];
+  if(!user?.ytTokens) return res.status(403).json({success:false, error:'YouTube not connected', code:'YT_NOT_CONNECTED'});
+
+  try{
+    const oauth2 = getOAuth2Client();
+    oauth2.setCredentials(user.ytTokens);
+
+    // Auto-refresh: save updated tokens if they changed
+    oauth2.on('tokens', (tokens)=>{
+      if(tokens.refresh_token) user.ytTokens.refresh_token = tokens.refresh_token;
+      user.ytTokens.access_token = tokens.access_token;
+      users[req.user.email] = user;
+      saveUsers(users);
+    });
+
+    const youtube   = google.youtube({version:'v3', auth:oauth2});
+    const analytics = google.youtubeAnalytics({version:'v2', auth:oauth2});
+
+    // Get channel id
+    const chRes = await youtube.channels.list({part:'id,snippet', mine:true});
+    const channel = chRes.data.items?.[0];
+    if(!channel) return res.status(404).json({success:false, error:'No channel found'});
+
+    const channelId    = channel.id;
+    const channelTitle = channel.snippet?.title || '';
+    const channelAvatar= channel.snippet?.thumbnails?.default?.url || '';
+
+    // Get uploads playlist
+    const detailRes  = await youtube.channels.list({part:'contentDetails', id:channelId});
+    const uploadsId  = detailRes.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+    if(!uploadsId) return res.status(404).json({success:false, error:'No uploads playlist'});
+
+    // Fetch up to 50 video IDs from uploads playlist
+    const plRes = await youtube.playlistItems.list({
+      part:'snippet', playlistId:uploadsId, maxResults:50,
+    });
+    const items    = plRes.data.items || [];
+    const videoIds = items.map(i=>i.snippet?.resourceId?.videoId).filter(Boolean);
+    if(!videoIds.length) return res.json({success:true, videos:[], channelTitle, channelAvatar});
+
+    // Batch fetch snippet + statistics for all video IDs
+    const statsRes = await youtube.videos.list({
+      part:'snippet,statistics', id:videoIds.join(','),
+    });
+    const videoMap = {};
+    for(const v of statsRes.data.items||[]){
+      videoMap[v.id] = {
+        id: v.id,
+        title: v.snippet?.title||'',
+        publishedAt: v.snippet?.publishedAt||'',
+        thumbnailUrl: v.snippet?.thumbnails?.maxres?.url
+          || v.snippet?.thumbnails?.high?.url
+          || v.snippet?.thumbnails?.medium?.url
+          || '',
+        viewCount: parseInt(v.statistics?.viewCount||'0',10),
+        likeCount: parseInt(v.statistics?.likeCount||'0',10),
+        commentCount: parseInt(v.statistics?.commentCount||'0',10),
+        ctr: null, // filled in from analytics below
+        avgViewDuration: null,
+      };
+    }
+
+    // Try fetching CTR from YouTube Analytics (may fail for newer channels)
+    try{
+      const startDate = new Date();
+      startDate.setFullYear(startDate.getFullYear()-1);
+      const startStr = startDate.toISOString().split('T')[0];
+      const endStr   = new Date().toISOString().split('T')[0];
+      const analyticsRes = await analytics.reports.query({
+        ids: `channel==${channelId}`,
+        startDate: startStr,
+        endDate:   endStr,
+        metrics:   'impressionClickThroughRate,averageViewDuration',
+        dimensions:'video',
+        maxResults: 50,
+      });
+      for(const row of analyticsRes.data.rows||[]){
+        const [vidId, ctr, avgDur] = row;
+        if(videoMap[vidId]){
+          videoMap[vidId].ctr             = parseFloat((ctr*100).toFixed(2));
+          videoMap[vidId].avgViewDuration = Math.round(avgDur);
+        }
+      }
+    }catch(analyticsErr){
+      console.warn('[YT THUMBNAILS] Analytics query failed (expected for some channels):',analyticsErr.message);
+    }
+
+    const videos = videoIds.map(id=>videoMap[id]).filter(Boolean);
+    res.json({success:true, videos, channelTitle, channelAvatar});
+
+  }catch(err){
+    console.error('[YT THUMBNAILS] Error:',err.message);
+    res.status(500).json({success:false, error:err.message, code:'YT_FETCH_FAILED'});
+  }
+});
+
+// POST /api/youtube/analyze — send thumbnails + perf data to Claude, get insights
+app.post('/api/youtube/analyze', authMiddleware, async(req,res)=>{
+  const users = loadUsers();
+  const user  = users[req.user.email];
+  if(!user?.ytTokens) return res.status(403).json({success:false, error:'YouTube not connected', code:'YT_NOT_CONNECTED'});
+
+  const quota = checkAndDecrementQuota(req.user.email);
+  if(!quota.ok) return res.status(402).json({success:false, error:quota.message, code:quota.code});
+
+  const {videos} = req.body;
+  if(!videos?.length) return res.status(400).json({success:false, error:'No videos provided'});
+
+  try{
+    // Sort by CTR desc (nulls last) to weight analysis toward real data
+    const sorted = [...videos].sort((a,b)=>{
+      if(a.ctr==null&&b.ctr==null) return b.viewCount-a.viewCount;
+      if(a.ctr==null) return 1;
+      if(b.ctr==null) return -1;
+      return b.ctr-a.ctr;
+    });
+
+    // Build thumbnail summary for Claude (no images — just URLs + stats)
+    const videoSummary = sorted.slice(0,50).map((v,i)=>`${i+1}. "${v.title}"
+   Views: ${v.viewCount.toLocaleString()} | CTR: ${v.ctr!=null?v.ctr+'%':'n/a'} | Avg watch: ${v.avgViewDuration!=null?v.avgViewDuration+'s':'n/a'}
+   Thumbnail URL: ${v.thumbnailUrl}`).join('\n\n');
+
+    const {niche:storedNiche, profile:nicheProfile} = getNicheProfile(req.user.email);
+    const nicheCtx = nicheProfile ? `Channel niche: ${nicheProfile.label}. ${nicheProfile.promptContext}` : '';
+
+    const prompt = `You are a YouTube thumbnail analyst. Analyze the following list of videos with their performance metrics and thumbnail URLs.
+
+${nicheCtx}
+
+VIDEO LIST (sorted by CTR desc):
+${videoSummary}
+
+Based on the thumbnail URLs and performance data, analyze patterns in visual style correlated with CTR and view count. Identify:
+1. Face positioning patterns (left/right/center/no face) and their CTR correlation
+2. Dominant color patterns (warm/cool/high-contrast/muted) and performance
+3. Text presence, size, and color patterns vs engagement
+4. Background complexity (busy/minimal/gradient/solid) vs CTR
+5. Thumbnail composition patterns (close-up/wide/action shot) vs performance
+6. Any channel-specific patterns unique to this creator's audience
+
+Return a JSON array of insight objects. Each insight must have:
+- "category": one of "face", "color", "text", "background", "composition", "channel"
+- "headline": short punchy insight title (max 8 words)
+- "detail": 1-2 sentence explanation with specific numbers/percentages if derivable
+- "impact": "high", "medium", or "low"
+- "recommendation": one concrete action the creator should take
+- "applyDefault": optional object like {"colorGrade":"warm"} if a default can be auto-applied
+
+Return ONLY valid JSON array, no markdown, no preamble.`;
+
+    const response = await anthropic.messages.create({
+      model: 'claude-opus-4-5-20251001',
+      max_tokens: 2048,
+      messages: [{role:'user', content: prompt}],
+    });
+
+    let insights = [];
+    const raw = response.content?.[0]?.text?.trim() || '[]';
+    try{
+      // Strip any markdown fences if present
+      const cleaned = raw.replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'');
+      insights = JSON.parse(cleaned);
+    }catch(parseErr){
+      console.error('[YT ANALYZE] JSON parse error:',parseErr.message,'raw:',raw.slice(0,200));
+      insights = [{
+        category:'channel',
+        headline:'Analysis complete',
+        detail:'Could not parse structured insights — check the raw response.',
+        impact:'low',
+        recommendation:'Try again with more video data.',
+      }];
+    }
+
+    res.json({success:true, insights, remaining:quota.remaining});
+  }catch(err){
+    console.error('[YT ANALYZE] Error:',err.message);
+    res.status(500).json({success:false, error:err.message, code:'ANALYZE_FAILED'});
   }
 });
 
