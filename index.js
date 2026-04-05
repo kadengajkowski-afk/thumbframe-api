@@ -1996,4 +1996,120 @@ Return ONLY valid JSON array, no markdown, no preamble.`;
   }
 });
 
+// ── Tier 3 Item 3: YouTube Search (Competitor Comparison) ─────────────────
+// In-memory cache: { term → { data, ts } }
+const ytSearchCache = new Map();
+
+// GET /api/youtube/search?q=<term>&maxResults=10
+app.get('/api/youtube/search', authMiddleware, async(req,res)=>{
+  const users = loadUsers();
+  const user  = users[req.user.email];
+  const plan  = (user?.plan||'free').toLowerCase();
+  if(plan!=='pro'&&plan!=='agency'&&!user?.is_admin){
+    return res.status(403).json({success:false,error:'Pro or Agency plan required for Competitor Comparison.',code:'PLAN_REQUIRED'});
+  }
+
+  const q = (req.query.q||'').trim();
+  if(!q) return res.status(400).json({success:false,error:'Missing search query'});
+  const maxResults = Math.min(parseInt(req.query.maxResults||'10',10),10);
+
+  // Check cache (1 hour TTL)
+  const cacheKey = `${q}::${maxResults}`;
+  const cached = ytSearchCache.get(cacheKey);
+  if(cached && Date.now()-cached.ts < 3600000){
+    return res.json({success:true,results:cached.data,fromCache:true});
+  }
+
+  const YT_KEY = process.env.YOUTUBE_DATA_API_KEY || process.env.GOOGLE_API_KEY || process.env.YOUTUBE_API_KEY;
+  if(!YT_KEY) return res.status(500).json({success:false,error:'YouTube API key not configured'});
+
+  try{
+    // Step 1: search.list
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${maxResults}&q=${encodeURIComponent(q)}&key=${YT_KEY}`;
+    const searchRes = await fetch(searchUrl);
+    if(!searchRes.ok){
+      const errText = await searchRes.text();
+      console.error('[YT SEARCH] search.list error:',searchRes.status,errText.slice(0,300));
+      return res.status(502).json({success:false,error:'YouTube search failed'});
+    }
+    const searchData = await searchRes.json();
+    const items = searchData.items||[];
+    if(!items.length) return res.json({success:true,results:[]});
+
+    const videoIds = items.map(i=>i.id?.videoId).filter(Boolean);
+
+    // Step 2: videos.list for statistics
+    const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds.join(',')}&key=${YT_KEY}`;
+    const statsRes = await fetch(statsUrl);
+    const statsData = statsRes.ok ? await statsRes.json() : {items:[]};
+    const statsMap = {};
+    for(const v of statsData.items||[]){
+      statsMap[v.id] = parseInt(v.statistics?.viewCount||'0',10);
+    }
+
+    const results = items.map(item=>{
+      const vid = item.id?.videoId;
+      const sn  = item.snippet||{};
+      return {
+        videoId:     vid,
+        title:       sn.title||'',
+        channelName: sn.channelTitle||'',
+        thumbnailUrl:sn.thumbnails?.high?.url||sn.thumbnails?.medium?.url||sn.thumbnails?.default?.url||'',
+        viewCount:   statsMap[vid]||0,
+        publishedAt: sn.publishedAt||'',
+      };
+    }).filter(r=>r.videoId);
+
+    // Store in cache
+    ytSearchCache.set(cacheKey,{data:results,ts:Date.now()});
+
+    res.json({success:true,results});
+  }catch(err){
+    console.error('[YT SEARCH] Error:',err.message);
+    res.status(500).json({success:false,error:err.message});
+  }
+});
+
+// POST /api/analyze-competition — Claude Vision competitive analysis
+app.post('/api/analyze-competition', authMiddleware, async(req,res)=>{
+  const quota = checkAndDecrementQuota(req.user.email);
+  if(!quota.ok) return res.status(402).json({success:false,error:quota.message,code:quota.code});
+
+  const {userThumbnailUrl, competitorThumbnails, searchTerm} = req.body;
+  if(!userThumbnailUrl) return res.status(400).json({success:false,error:'Missing userThumbnailUrl'});
+
+  try{
+    const competitorList = (competitorThumbnails||[]).slice(0,10).map((c,i)=>
+      `${i+1}. "${c.title}" by ${c.channelName} — ${c.viewCount!=null?`${(c.viewCount/1000).toFixed(0)}K views`:''}`
+    ).join('\n');
+
+    const base64 = userThumbnailUrl.includes(',') ? userThumbnailUrl.split(',')[1] : userThumbnailUrl;
+    const mediaType = userThumbnailUrl.startsWith('data:') ? (userThumbnailUrl.split(';')[0].split(':')[1]||'image/jpeg') : 'image/jpeg';
+
+    const response = await anthropic.messages.create({
+      model: 'claude-opus-4-5-20251001',
+      max_tokens: 1024,
+      messages:[{
+        role:'user',
+        content:[
+          {
+            type:'image',
+            source:{type:'base64',media_type:mediaType,data:base64},
+          },
+          {
+            type:'text',
+            text:`You are a YouTube thumbnail strategist. The image above is a creator's thumbnail. They are competing in the "${searchTerm||'YouTube'}" space against these videos:\n\n${competitorList}\n\nAnalyze the creator's thumbnail vs. this competitive landscape. Give 4-6 bullet-point insights covering:\n- Visual differentiation (does it stand out?)\n- Color and contrast compared to typical thumbnails in this space\n- Text clarity and emotional hook\n- Face/subject positioning\n- Specific recommendations to improve CTR against these competitors\n\nRespond with ONLY bullet points (each starting with •), no headers, no preamble.`,
+          },
+        ],
+      }],
+    });
+
+    const insights = response.content?.[0]?.text?.trim()||'No insights generated.';
+    res.json({success:true,insights,remaining:quota.remaining});
+  }catch(err){
+    console.error('[ANALYZE-COMPETITION] Error:',err.message);
+    res.status(500).json({success:false,error:err.message});
+  }
+});
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
