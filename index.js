@@ -137,28 +137,235 @@ app.get('/proxy-image', async(req,res)=>{
   }
 });
 
-app.post('/ai-generate', async(req,res)=>{
-  try{
-    const { prompt } = req.body;
-    if(!prompt) return res.status(400).json({error:'No prompt'});
-    console.log('DALL-E 3 generating:',prompt);
-    const response = await openai.images.generate({
-      model:   'dall-e-3',
-      prompt:  `YouTube thumbnail background: ${prompt}. Dramatic lighting, high contrast, vivid colors, cinematic, no text, no watermarks, no logos.`,
-      n:       1,
-      size:    '1792x1024',
-      quality: 'standard',
-      style:   'vivid',
+// ── Image Generation Helper Functions ────────────────────────────────────────
+
+async function generateWithDallE3(prompt, size, style) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not set');
+
+  const validSize = ['1024x1024','1792x1024','1024x1792'].includes(size) ? size : '1792x1024';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  let response;
+  try {
+    response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'dall-e-3',
+        prompt,
+        n: 1,
+        size: validSize,
+        style: style || 'vivid',
+        response_format: 'url',
+      }),
+      signal: controller.signal,
     });
-    const imageUrl = response.data[0].url;
-    const imgRes   = await fetch(imageUrl);
-    const buffer   = Buffer.from(await imgRes.arrayBuffer());
-    console.log('DALL-E success, size:',buffer.length);
-    res.json({ image:`data:image/png;base64,${buffer.toString('base64')}` });
-  }catch(err){
-    console.error('DALL-E error:',err.message);
-    res.status(500).json({error:`Generation failed: ${err.message}`});
+  } finally {
+    clearTimeout(timeout);
   }
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(`DALL-E 3 HTTP ${response.status}: ${errData?.error?.message || 'Unknown error'}`);
+  }
+
+  const data = await response.json();
+  if (!data?.data?.[0]?.url) throw new Error('DALL-E 3 returned no image URL');
+  return { imageUrl: data.data[0].url };
+}
+
+async function generateWithReplicateFlux(prompt) {
+  const apiKey = process.env.REPLICATE_API_TOKEN;
+  if (!apiKey) throw new Error('REPLICATE_API_TOKEN not set');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const response = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait=60',
+      },
+      body: JSON.stringify({
+        input: {
+          prompt,
+          aspect_ratio: '16:9',
+          output_format: 'webp',
+          num_outputs: 1,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(`Replicate Flux HTTP ${response.status}: ${errData?.detail || JSON.stringify(errData)}`);
+    }
+
+    const data = await response.json();
+
+    if (data.status === 'processing' || data.status === 'starting') {
+      const predictionId = data.id;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const poll = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+          headers: { 'Authorization': `Token ${apiKey}` },
+        });
+        const pollData = await poll.json();
+        if (pollData.status === 'succeeded' && pollData.output?.[0]) {
+          return { imageUrl: pollData.output[0] };
+        }
+        if (pollData.status === 'failed') {
+          throw new Error(`Replicate Flux prediction failed: ${pollData.error || 'Unknown'}`);
+        }
+      }
+      throw new Error('Replicate Flux timed out waiting for result');
+    }
+
+    if (data.output?.[0]) return { imageUrl: data.output[0] };
+    throw new Error('Replicate Flux returned no output');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function generateWithReplicateSDXL(prompt) {
+  const apiKey = process.env.REPLICATE_API_TOKEN;
+  if (!apiKey) throw new Error('REPLICATE_API_TOKEN not set');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const response = await fetch('https://api.replicate.com/v1/models/stability-ai/sdxl/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait=60',
+      },
+      body: JSON.stringify({
+        input: {
+          prompt,
+          width: 1024,
+          height: 576,
+          num_outputs: 1,
+          scheduler: 'K_EULER',
+          num_inference_steps: 25,
+          guidance_scale: 7.5,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(`Replicate SDXL HTTP ${response.status}: ${errData?.detail || JSON.stringify(errData)}`);
+    }
+
+    const data = await response.json();
+    if (data.output?.[0]) return { imageUrl: data.output[0] };
+
+    if (data.id && (data.status === 'starting' || data.status === 'processing')) {
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const poll = await fetch(`https://api.replicate.com/v1/predictions/${data.id}`, {
+          headers: { 'Authorization': `Token ${apiKey}` },
+        });
+        const pollData = await poll.json();
+        if (pollData.status === 'succeeded' && pollData.output?.[0]) {
+          return { imageUrl: pollData.output[0] };
+        }
+        if (pollData.status === 'failed') throw new Error('SDXL prediction failed');
+      }
+    }
+
+    throw new Error('Replicate SDXL returned no output');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ── POST /api/generate-image — multi-provider fallback pipeline ───────────────
+app.post('/api/generate-image', authMiddleware, async(req, res) => {
+  const { prompt, size = '1792x1024', style = 'vivid' } = req.body;
+  if (!prompt || typeof prompt !== 'string') {
+    return res.status(400).json({ success: false, error: 'Prompt is required' });
+  }
+
+  const quota = checkAndDecrementQuota(req.user.email);
+  if (!quota.ok) return res.status(429).json({ success: false, error: quota.message, code: quota.code });
+
+  const providers = [
+    { name: 'dall-e-3',        fn: () => generateWithDallE3(prompt, size, style) },
+    { name: 'replicate-flux',  fn: () => generateWithReplicateFlux(prompt) },
+    { name: 'replicate-sdxl',  fn: () => generateWithReplicateSDXL(prompt) },
+  ];
+
+  for (const provider of providers) {
+    try {
+      console.log(`[generate-image] Trying ${provider.name} for ${req.user.email}...`);
+      const result = await provider.fn();
+      console.log(`[generate-image] ${provider.name} succeeded`);
+      return res.json({
+        success: true,
+        image: result.imageUrl || result.imageBase64,
+        format: result.imageUrl ? 'url' : 'base64',
+        provider: provider.name,
+        remaining: quota.remaining,
+      });
+    } catch (err) {
+      console.error(`[generate-image] ${provider.name} failed:`, err.message);
+    }
+  }
+
+  return res.status(500).json({
+    success: false,
+    error: 'Image generation is temporarily unavailable. Please try again in a few minutes.',
+  });
+});
+
+// ── POST /ai-generate — legacy endpoint (kept for compatibility) ──────────────
+app.post('/ai-generate', authMiddleware, async(req,res)=>{
+  const { prompt } = req.body;
+  if(!prompt) return res.status(400).json({error:'No prompt'});
+
+  const quota = checkAndDecrementQuota(req.user.email);
+  if (!quota.ok) return res.status(429).json({ error: quota.message });
+
+  const fullPrompt = `YouTube thumbnail background: ${prompt}. Dramatic lighting, high contrast, vivid colors, cinematic, no text, no watermarks, no logos.`;
+
+  const providers = [
+    { name: 'dall-e-3',       fn: () => generateWithDallE3(fullPrompt, '1792x1024', 'vivid') },
+    { name: 'replicate-flux', fn: () => generateWithReplicateFlux(fullPrompt) },
+    { name: 'replicate-sdxl', fn: () => generateWithReplicateSDXL(fullPrompt) },
+  ];
+
+  for (const provider of providers) {
+    try {
+      console.log(`[ai-generate] Trying ${provider.name}...`);
+      const result = await provider.fn();
+      console.log(`[ai-generate] ${provider.name} succeeded`);
+      const imageUrl = result.imageUrl;
+      // Legacy: fetch URL and return base64 so old frontend code still works
+      const imgRes = await fetch(imageUrl);
+      const buffer = Buffer.from(await imgRes.arrayBuffer());
+      return res.json({ image: `data:image/png;base64,${buffer.toString('base64')}` });
+    } catch (err) {
+      console.error(`[ai-generate] ${provider.name} failed:`, err.message);
+    }
+  }
+
+  res.status(500).json({ error: 'Image generation is temporarily unavailable. Please try again.' });
 });
 
 // ── AI Command bar (Claude) ────────────────────────────────────────────────────
@@ -1174,17 +1381,27 @@ app.post('/api/generate-background', authMiddleware, async(req,res)=>{
     const fullPrompt=`YouTube thumbnail background: ${[nicheBase,custom].filter(Boolean).join(', ')}. Cinematic, high quality, no watermarks, no logos, no text overlays, no UI elements.`;
 
     console.log(`[BGGEN] Generating for ${req.user.email} — niche: ${niche||'stored'||'custom'}`);
-    const aiRes=await openai.images.generate({
-      model:'dall-e-3',
-      prompt:fullPrompt,
-      n:1,
-      size:'1792x1024',
-      quality:'standard',
-      style:'vivid',
-    });
+    // Use multi-provider fallback pipeline
+    let bgImageUrl;
+    const bgProviders = [
+      { name: 'dall-e-3',       fn: () => generateWithDallE3(fullPrompt, '1792x1024', 'vivid') },
+      { name: 'replicate-flux', fn: () => generateWithReplicateFlux(fullPrompt) },
+      { name: 'replicate-sdxl', fn: () => generateWithReplicateSDXL(fullPrompt) },
+    ];
+    for (const p of bgProviders) {
+      try {
+        console.log(`[BGGEN] Trying ${p.name}...`);
+        const result = await p.fn();
+        bgImageUrl = result.imageUrl;
+        console.log(`[BGGEN] ${p.name} succeeded`);
+        break;
+      } catch (e) {
+        console.error(`[BGGEN] ${p.name} failed:`, e.message);
+      }
+    }
+    if (!bgImageUrl) throw new Error('All background generation providers failed');
 
-    const imageUrl=aiRes.data[0].url;
-    const imgFetch=await fetch(imageUrl);
+    const imgFetch=await fetch(bgImageUrl);
     let bgBuf=Buffer.from(await imgFetch.arrayBuffer());
 
     // Resize to YouTube thumbnail dimensions
@@ -1496,8 +1713,25 @@ app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
       const nicheBase=NICHE_BG_PROMPTS[nicheKey]||NICHE_BG_PROMPTS.gaming;
       const bgPrompt=`YouTube thumbnail background: ${nicheBase}. Cinematic, high quality, vibrant neon lighting, no watermarks, no logos, no text overlays.`;
       console.log(`[VARIANTS] Variant 5 — generating neon+background for ${req.user.email}`);
-      const aiImg=await openai.images.generate({model:'dall-e-3',prompt:bgPrompt,n:1,size:'1792x1024',quality:'standard',style:'vivid'});
-      const bgUrl=aiImg.data[0].url;
+      // Use multi-provider fallback pipeline instead of raw openai call
+      let bgUrl;
+      const v5providers = [
+        { name: 'dall-e-3',       fn: () => generateWithDallE3(bgPrompt, '1792x1024', 'vivid') },
+        { name: 'replicate-flux', fn: () => generateWithReplicateFlux(bgPrompt) },
+        { name: 'replicate-sdxl', fn: () => generateWithReplicateSDXL(bgPrompt) },
+      ];
+      for (const p of v5providers) {
+        try {
+          console.log(`[VARIANTS] Variant 5 trying ${p.name}...`);
+          const result = await p.fn();
+          bgUrl = result.imageUrl;
+          console.log(`[VARIANTS] Variant 5 ${p.name} succeeded`);
+          break;
+        } catch (e) {
+          console.error(`[VARIANTS] Variant 5 ${p.name} failed:`, e.message);
+        }
+      }
+      if (!bgUrl) throw new Error('All background generation providers failed for Variant 5');
       const bgFetch=await fetch(bgUrl);
       let bgBuf=Buffer.from(await bgFetch.arrayBuffer());
       bgBuf=await sharp(bgBuf).resize(1280,720,{fit:'cover'}).jpeg({quality:93}).toBuffer();
