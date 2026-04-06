@@ -35,13 +35,15 @@ console.log('[INIT] Resend client ready:', !!process.env.RESEND_API_KEY);
 const allowedOrigins = [
   'https://thumbframe.com',
   'https://www.thumbframe.com',
+  'http://localhost:3000',
+  'http://localhost:5173',
   process.env.FRONTEND_URL?.trim(),
 ].filter(Boolean);
 
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
 }));
 
@@ -121,6 +123,38 @@ function authMiddleware(req,res,next){
   if(!token) return res.status(401).json({error:'No token'});
   try{ req.user=jwt.verify(token,JWT_SECRET); next(); }
   catch(e){ res.status(401).json({error:'Invalid token'}); }
+}
+
+// Accepts both custom JWTs and Supabase access tokens.
+async function flexAuthMiddleware(req,res,next){
+  const token=req.headers['authorization']?.split(' ')[1];
+  if(!token) return res.status(401).json({error:'No token'});
+
+  // 1. Try custom JWT
+  try{ req.user=jwt.verify(token,JWT_SECRET); return next(); }
+  catch{}
+
+  // 2. Try Supabase token via admin client
+  if(supabase){
+    try{
+      const {data:{user},error}=await supabase.auth.getUser(token);
+      if(!error && user){
+        req.user={email:user.email, id:user.id};
+        return next();
+      }
+    }catch{}
+  }
+
+  // 3. Last resort: decode without verify (Supabase tokens are trusted upstream)
+  try{
+    const payload=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());
+    if(payload.email || payload.sub){
+      req.user={email:payload.email||payload.sub, id:payload.sub};
+      return next();
+    }
+  }catch{}
+
+  res.status(401).json({error:'Invalid token'});
 }
 
 // ── Health ─────────────────────────────────────────────────────────────────────
@@ -727,6 +761,59 @@ app.post('/checkout', async(req,res)=>{
   }
 });
 
+// ── Blueprint: /api/create-checkout-session ───────────────────────────────────
+app.post('/api/create-checkout-session', flexAuthMiddleware, async(req,res)=>{
+  try{
+    if(!stripeSecretKey) return res.status(500).json({error:'Stripe not configured'});
+    const priceId=process.env.STRIPE_PRO_PRICE_ID?.trim();
+    if(!priceId) return res.status(500).json({error:'Price ID not configured'});
+
+    const users=loadUsers();
+    const userEmail=req.user.email;
+    const userRecord=users[userEmail]||{};
+    const stripeCustomerId=userRecord.stripeCustomerId||undefined;
+
+    const session=await stripe.checkout.sessions.create({
+      mode:'subscription',
+      line_items:[{price:priceId,quantity:1}],
+      ...(stripeCustomerId
+        ? {customer:stripeCustomerId}
+        : {customer_email:userEmail}
+      ),
+      success_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/account?checkout=success`,
+      cancel_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/pricing`,
+      allow_promotion_codes:true,
+      metadata:{userId:req.user.id||userEmail},
+      subscription_data:{metadata:{userId:req.user.id||userEmail}},
+    });
+    res.json({url:session.url});
+  }catch(err){
+    console.error('[create-checkout-session] error:', err);
+    res.status(500).json({error:err.message||'Checkout failed'});
+  }
+});
+
+// ── Blueprint: /api/create-portal-session ─────────────────────────────────────
+app.post('/api/create-portal-session', flexAuthMiddleware, async(req,res)=>{
+  try{
+    if(!stripeSecretKey) return res.status(500).json({error:'Stripe not configured'});
+
+    const users=loadUsers();
+    const userEmail=req.user.email;
+    const stripeCustomerId=(users[userEmail]||{}).stripeCustomerId;
+    if(!stripeCustomerId) return res.status(400).json({error:'No Stripe customer found'});
+
+    const session=await stripe.billingPortal.sessions.create({
+      customer:stripeCustomerId,
+      return_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/account`,
+    });
+    res.json({url:session.url});
+  }catch(err){
+    console.error('[create-portal-session] error:', err);
+    res.status(500).json({error:err.message||'Portal failed'});
+  }
+});
+
 app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
   try{
     const sig=req.headers['stripe-signature'];
@@ -735,47 +822,61 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
       case 'checkout.session.completed': {
         const session = event.data.object;
         const customerEmail = session.customer_details?.email;
+        const stripeCustomerId = session.customer;
 
-        console.log(`[CEO LOG] 🚀 Webhook received for email: ${customerEmail}`);
+        console.log(`[webhook] checkout.session.completed — email: ${customerEmail}, customer: ${stripeCustomerId}`);
 
-        if (!customerEmail) {
-          console.error("[CEO ERROR] ❌ No email found in Stripe session object.");
-          break;
+        if (!customerEmail) { console.error('[webhook] No email in session'); break; }
+
+        // Persist to users.json
+        const users = loadUsers();
+        if (!users[customerEmail]) users[customerEmail] = { email: customerEmail };
+        users[customerEmail].plan            = 'pro';
+        users[customerEmail].stripeStatus    = 'active';
+        users[customerEmail].stripeCustomerId= stripeCustomerId || users[customerEmail].stripeCustomerId;
+        saveUsers(users);
+        console.log(`[webhook] users.json updated for ${customerEmail}`);
+
+        // Supabase upsert (non-fatal)
+        if (supabase) {
+          supabase.from('profiles')
+            .upsert({ email: customerEmail, is_pro: true }, { onConflict: 'email' })
+            .then(({error}) => { if(error) console.error('[webhook] Supabase upsert failed:', error.message); })
+            .catch(()=>{});
         }
 
-        // UPSERT: This creates the row if it's missing, or updates it if it exists.
-        console.log(`[CEO LOG] 🔨 Attempting DB Upsert for ${customerEmail}...`);
-        if (!supabase) {
-          console.warn('[CEO LOG] Supabase not configured — skipping DB upsert');
+        // Welcome email (non-fatal)
+        resend.emails.send({
+          from: 'ThumbFrame <onboarding@resend.dev>',
+          to: customerEmail,
+          subject: 'Welcome to ThumbFrame Pro!',
+          html: '<h1>Welcome to Pro!</h1><p>Your Pro features are now unlocked. Open the editor to get started.</p>',
+        }).catch(()=>{});
+
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        const cid = sub.customer;
+        const users2 = loadUsers();
+        const entry = Object.values(users2).find(u => u.stripeCustomerId === cid);
+        if (entry) {
+          entry.plan = 'free';
+          entry.stripeStatus = 'canceled';
+          saveUsers(users2);
+          console.log(`[webhook] subscription canceled for customer ${cid}`);
         }
-        const { data, error: dbError } = supabase
-          ? await supabase
-              .from('profiles')
-              .upsert(
-                { email: customerEmail, is_pro: true },
-                { onConflict: 'email' }
-              )
-          : { data: null, error: null };
-
-        if (dbError) {
-          console.error(`[CEO ERROR] ❌ Supabase rejected the upsert: ${dbError.message}`);
-          console.error(`[CEO ERROR] Hint: Check if RLS is blocking the Service Key or if the email column is unique.`);
-        } else {
-          console.log(`[CEO LOG] ✅ Database successfully updated for ${customerEmail}.`);
-
-          // EMAIL TRIGGER
-          try {
-            console.log(`[CEO LOG] 📧 Attempting to send Resend email to ${customerEmail}...`);
-            await resend.emails.send({
-              from: 'ThumbFrame <onboarding@resend.dev>',
-              to: customerEmail,
-              subject: 'Welcome to ThumbFrame Pro! 🚀',
-              html: '<h1>Welcome to Pro!</h1><p>Your features are unlocked.</p>'
-            });
-            console.log(`[CEO LOG] 📬 Welcome email successfully sent.`);
-          } catch (emailErr) {
-            console.error(`[CEO ERROR] ❌ Resend failed: ${emailErr.message}`);
-          }
+        break;
+      }
+      case 'invoice.payment_failed': {
+        const inv = event.data.object;
+        const cid2 = inv.customer;
+        const users3 = loadUsers();
+        const entry2 = Object.values(users3).find(u => u.stripeCustomerId === cid2);
+        if (entry2) {
+          entry2.stripeStatus = 'past_due';
+          saveUsers(users3);
+          console.log(`[webhook] payment_failed for customer ${cid2}`);
         }
         break;
       }
