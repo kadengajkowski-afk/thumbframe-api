@@ -555,6 +555,21 @@ app.get('/auth/me', authMiddleware,(req,res)=>{
   res.json({email:user.email,name:user.name,plan:user.plan||'free'});
 });
 
+// /api/me — blueprint-spec endpoint (same data, richer shape)
+app.get('/api/me', authMiddleware,(req,res)=>{
+  const users=loadUsers();
+  const user=users[req.user.email];
+  if(!user) return res.status(404).json({error:'User not found'});
+  res.json({
+    id:               req.user.email,
+    email:            user.email,
+    name:             user.name,
+    plan:             user.plan||'free',
+    stripeCustomerId: user.stripeCustomerId||null,
+    createdAt:        user.createdAt||null,
+  });
+});
+
 // ── Password reset ─────────────────────────────────────────────────────────────
 const resetTokens = {};
 
