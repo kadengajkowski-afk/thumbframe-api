@@ -25,7 +25,9 @@ const openai     = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const resend     = new Resend(process.env.RESEND_API_KEY);
 const replicate  = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-const supabase   = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const supabase   = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY)
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+  : null;
 
 console.log('[INIT] Supabase admin client ready:', !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY);
 console.log('[INIT] Resend client ready:', !!process.env.RESEND_API_KEY);
@@ -725,12 +727,17 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
 
         // UPSERT: This creates the row if it's missing, or updates it if it exists.
         console.log(`[CEO LOG] 🔨 Attempting DB Upsert for ${customerEmail}...`);
-        const { data, error: dbError } = await supabase
-          .from('profiles')
-          .upsert(
-            { email: customerEmail, is_pro: true },
-            { onConflict: 'email' }
-          );
+        if (!supabase) {
+          console.warn('[CEO LOG] Supabase not configured — skipping DB upsert');
+        }
+        const { data, error: dbError } = supabase
+          ? await supabase
+              .from('profiles')
+              .upsert(
+                { email: customerEmail, is_pro: true },
+                { onConflict: 'email' }
+              )
+          : { data: null, error: null };
 
         if (dbError) {
           console.error(`[CEO ERROR] ❌ Supabase rejected the upsert: ${dbError.message}`);
