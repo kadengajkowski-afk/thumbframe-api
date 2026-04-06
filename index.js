@@ -55,7 +55,8 @@ const USERS_FILE    = path.join(__dirname,'users.json');
 const DESIGNS_FILE  = path.join(__dirname,'designs.json');
 const TEAMS_FILE    = path.join(__dirname,'teams.json');
 const COMMENTS_FILE = path.join(__dirname,'comments.json');
-const VERSIONS_FILE = path.join(__dirname,'versions.json');
+const VERSIONS_FILE    = path.join(__dirname,'versions.json');
+const NEWSLETTER_FILE  = path.join(__dirname,'newsletter.json');
 
 function loadKeys(){ try{ return JSON.parse(fs.readFileSync(KEYS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveKeys(k){ fs.writeFileSync(KEYS_FILE,JSON.stringify(k,null,2)); }
@@ -69,6 +70,8 @@ function loadComments(){ try{ return JSON.parse(fs.readFileSync(COMMENTS_FILE,'u
 function saveComments(c){ fs.writeFileSync(COMMENTS_FILE,JSON.stringify(c,null,2)); }
 function loadVersions(){ try{ return JSON.parse(fs.readFileSync(VERSIONS_FILE,'utf8')); }catch(e){ return {}; } }
 function saveVersions(v){ fs.writeFileSync(VERSIONS_FILE,JSON.stringify(v,null,2)); }
+function loadNewsletter(){ try{ return JSON.parse(fs.readFileSync(NEWSLETTER_FILE,'utf8')); }catch(e){ return []; } }
+function saveNewsletter(d){ fs.writeFileSync(NEWSLETTER_FILE,JSON.stringify(d,null,2)); }
 function validateKey(key){ const keys=loadKeys(); return keys[key]||null; }
 
 // ── AI Quota System ────────────────────────────────────────────────────────────
@@ -2353,6 +2356,45 @@ app.post('/api/analyze-competition', authMiddleware, async(req,res)=>{
     console.error('[ANALYZE-COMPETITION] Error:',err.message);
     res.status(500).json({success:false,error:err.message});
   }
+});
+
+// ── POST /api/newsletter/subscribe ────────────────────────────────────────────
+app.post('/api/newsletter/subscribe', async(req,res)=>{
+  const { email } = req.body;
+  if(!email || !email.includes('@')) return res.status(400).json({success:false,error:'Invalid email'});
+
+  const list = loadNewsletter();
+  const norm = email.toLowerCase().trim();
+
+  if(list.some(e => e.email === norm)){
+    return res.json({success:true,message:'Already subscribed'});
+  }
+
+  list.push({ email: norm, subscribedAt: new Date().toISOString() });
+  saveNewsletter(list);
+
+  try{
+    await resend.emails.send({
+      from: 'ThumbFrame <onboarding@resend.dev>',
+      to: norm,
+      subject: "You're in — welcome to ThumbFrame",
+      html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;color:#f4f4f5;background:#0a0a0a;padding:32px 24px;border-radius:12px">
+        <div style="font-size:22px;font-weight:800;margin-bottom:8px">You're on the list. <span style="color:#f97316">✦</span></div>
+        <p style="color:#a1a1aa;font-size:15px;line-height:1.6">
+          Thanks for subscribing to the ThumbFrame newsletter. Every week we send thumbnail tips, new feature announcements, and creator resources straight to your inbox.
+        </p>
+        <p style="color:#a1a1aa;font-size:14px;margin-top:24px">
+          In the meantime, <a href="https://thumbframe.com" style="color:#f97316;text-decoration:none">open the editor</a> and make your next thumbnail.
+        </p>
+        <hr style="border:none;border-top:1px solid #202020;margin:28px 0" />
+        <p style="color:#52525b;font-size:12px">ThumbFrame · <a href="https://thumbframe.com/privacy" style="color:#52525b">Privacy</a></p>
+      </div>`,
+    });
+  }catch(emailErr){
+    console.error('[NEWSLETTER] Resend error:',emailErr.message);
+  }
+
+  res.json({success:true,message:'Subscribed'});
 });
 
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
