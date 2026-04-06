@@ -1297,7 +1297,9 @@ async function runColorGradePipeline(imageBuf, presetName, intensity){
   let pipeline=sharp(imageBuf);
 
   // Gamma (S-curve shadow/highlight shaping)
-  if(Math.abs(gamma-1)>0.01) pipeline=pipeline.gamma(Math.max(0.3,Math.min(3.0,gamma)));
+  // Sharp 0.33+ requires gamma >= 1.0; skip the call for values below 1.0
+  // (the linear + modulate steps still shape the tone for those presets)
+  if(gamma>1.01) pipeline=pipeline.gamma(Math.min(3.0,gamma));
 
   // Levels (contrast + black point crush)
   pipeline=pipeline.linear(Math.max(0.4,Math.min(2.5,cA)),Math.round(cB));
