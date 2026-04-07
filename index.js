@@ -336,7 +336,7 @@ async function generateWithReplicateSDXL(prompt) {
 }
 
 // ── POST /api/generate-image — multi-provider fallback pipeline ───────────────
-app.post('/api/generate-image', authMiddleware, async(req, res) => {
+app.post('/api/generate-image', flexAuthMiddleware, async(req, res) => {
   const { prompt, size = '1792x1024', style = 'vivid' } = req.body;
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ success: false, error: 'Prompt is required' });
@@ -375,7 +375,7 @@ app.post('/api/generate-image', authMiddleware, async(req, res) => {
 });
 
 // ── POST /ai-generate — legacy endpoint (kept for compatibility) ──────────────
-app.post('/ai-generate', authMiddleware, async(req,res)=>{
+app.post('/ai-generate', flexAuthMiddleware, async(req,res)=>{
   const { prompt } = req.body;
   if(!prompt) return res.status(400).json({error:'No prompt'});
 
@@ -583,7 +583,7 @@ app.post('/auth/login', async(req,res)=>{
   }
 });
 
-app.get('/auth/me', authMiddleware,(req,res)=>{
+app.get('/auth/me', flexAuthMiddleware,(req,res)=>{
   const users=loadUsers();
   const user=users[req.user.email];
   if(!user) return res.status(404).json({error:'User not found'});
@@ -1098,7 +1098,7 @@ setInterval(()=>{
 }, 14 * 60 * 1000);
 
 // ── Smart Subject Detection — SAM 2 via Replicate ─────────────────────────────
-app.post('/api/segment', authMiddleware, async(req,res)=>{
+app.post('/api/segment', flexAuthMiddleware, async(req,res)=>{
   try{
     const {image}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -1172,7 +1172,7 @@ app.post('/api/analyze-face', (req, res) => {
 });
 
 // ── AI Expression Enhancement — SD Inpainting via Replicate ───────────────────
-app.post('/api/enhance-expression', authMiddleware, async(req,res)=>{
+app.post('/api/enhance-expression', flexAuthMiddleware, async(req,res)=>{
   try{
     const{faceCrop,mask,instruction}=req.body;
     if(!faceCrop||!faceCrop.startsWith('data:image/')||!mask||!instruction){
@@ -1275,12 +1275,12 @@ function getNicheProfile(email){
 }
 
 // ── Niche Set/Get Endpoints ───────────────────────────────────────────────────
-app.get('/api/get-niche', authMiddleware, (req,res)=>{
+app.get('/api/get-niche', flexAuthMiddleware, (req,res)=>{
   const {niche,profile}=getNicheProfile(req.user.email);
   res.json({success:true, niche, profile, nicheSet:!!niche});
 });
 
-app.post('/api/set-niche', authMiddleware, (req,res)=>{
+app.post('/api/set-niche', flexAuthMiddleware, (req,res)=>{
   const {niche}=req.body;
   if(!niche||!NICHE_PROFILES[niche]){
     return res.status(400).json({success:false,error:'Invalid niche. Must be one of: '+Object.keys(NICHE_PROFILES).join(', '),code:'INVALID_INPUT'});
@@ -1294,7 +1294,7 @@ app.post('/api/set-niche', authMiddleware, (req,res)=>{
 });
 
 // ── AI Text Engine — Claude Vision API ────────────────────────────────────────
-app.post('/api/generate-text', authMiddleware, async(req,res)=>{
+app.post('/api/generate-text', flexAuthMiddleware, async(req,res)=>{
   try{
     const{title,niche,image}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -1385,7 +1385,7 @@ Output only the JSON array.`;
 });
 
 // ── Composition AI — Claude Vision API ────────────────────────────────────────
-app.post('/api/analyze-composition', authMiddleware, async(req,res)=>{
+app.post('/api/analyze-composition', flexAuthMiddleware, async(req,res)=>{
   try{
     const{image,title}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -1449,7 +1449,7 @@ app.post('/api/analyze-composition', authMiddleware, async(req,res)=>{
 });
 
 // ── CTR Prediction Score v2 — Claude Vision API ───────────────────────────────
-app.post('/api/ctr-score-v2', authMiddleware, async(req,res)=>{
+app.post('/api/ctr-score-v2', flexAuthMiddleware, async(req,res)=>{
   try{
     const{image,title,niche}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -1877,7 +1877,7 @@ async function runColorGradePipeline(imageBuf, presetName, intensity){
   return pipeline.jpeg({quality:94}).toBuffer();
 }
 
-app.post('/api/color-grade', authMiddleware, async(req,res)=>{
+app.post('/api/color-grade', flexAuthMiddleware, async(req,res)=>{
   try{
     const{image,preset='default',intensity=80}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -1917,7 +1917,7 @@ const NICHE_BG_PROMPTS = {
   education: 'clean bright whiteboard aesthetic, soft academic warmth, library shelves, open airy light, no people, no text',
 };
 
-app.post('/api/generate-background', authMiddleware, async(req,res)=>{
+app.post('/api/generate-background', flexAuthMiddleware, async(req,res)=>{
   try{
     const{niche,customPrompt,subject,intensity=100}=req.body;
     if(!niche&&!customPrompt){
@@ -2110,7 +2110,7 @@ async function applyStylePipeline(imageBuf, modulate, linear, intensity){
     .toBuffer();
 }
 
-app.post('/api/style-transfer', authMiddleware, async(req,res)=>{
+app.post('/api/style-transfer', flexAuthMiddleware, async(req,res)=>{
   try{
     const{image,preset,referenceUrl,intensity=75}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -2176,7 +2176,7 @@ app.post('/api/style-transfer', authMiddleware, async(req,res)=>{
 // ── AI Variant Generator — Feature I ──────────────────────────────────────────
 // Accepts variantType 1-5, returns one {base64,label,description} per call.
 // Frontend calls all 5 in parallel for progressive card population.
-app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
+app.post('/api/generate-variants', flexAuthMiddleware, async(req,res)=>{
   try{
     const{image,title='',niche='gaming',variantType}=req.body;
     if(!image||!image.startsWith('data:image/')){
@@ -2637,7 +2637,7 @@ function agencyMiddleware(req,res,next){
 }
 
 // POST /api/team/create
-app.post('/api/team/create', authMiddleware, agencyMiddleware, (req,res)=>{
+app.post('/api/team/create', flexAuthMiddleware, agencyMiddleware, (req,res)=>{
   const {name} = req.body;
   if(!name?.trim()) return res.status(400).json({success:false,error:'Team name required'});
   const teams=loadTeams();
@@ -2658,7 +2658,7 @@ app.post('/api/team/create', authMiddleware, agencyMiddleware, (req,res)=>{
 });
 
 // POST /api/team/invite
-app.post('/api/team/invite', authMiddleware, agencyMiddleware, async(req,res)=>{
+app.post('/api/team/invite', flexAuthMiddleware, agencyMiddleware, async(req,res)=>{
   const {teamId, inviteEmail} = req.body;
   if(!teamId||!inviteEmail) return res.status(400).json({success:false,error:'teamId and inviteEmail required'});
   const teams=loadTeams();
@@ -2694,7 +2694,7 @@ app.post('/api/team/invite', authMiddleware, agencyMiddleware, async(req,res)=>{
 });
 
 // GET /api/team/join?token=xxx&teamId=xxx
-app.get('/api/team/join', authMiddleware, (req,res)=>{
+app.get('/api/team/join', flexAuthMiddleware, (req,res)=>{
   const {token, teamId} = req.query;
   if(!token||!teamId) return res.status(400).json({success:false,error:'Missing token or teamId'});
   const teams=loadTeams();
@@ -2716,7 +2716,7 @@ app.get('/api/team/join', authMiddleware, (req,res)=>{
 });
 
 // GET /api/team/me — get the user's current team
-app.get('/api/team/me', authMiddleware, (req,res)=>{
+app.get('/api/team/me', flexAuthMiddleware, (req,res)=>{
   const users=loadUsers();
   const teamId=users[req.user.email]?.teamId;
   if(!teamId) return res.json({success:true, team:null});
@@ -2726,7 +2726,7 @@ app.get('/api/team/me', authMiddleware, (req,res)=>{
 });
 
 // GET /api/team/projects
-app.get('/api/team/projects', authMiddleware, (req,res)=>{
+app.get('/api/team/projects', flexAuthMiddleware, (req,res)=>{
   const users=loadUsers();
   const teamId=users[req.user.email]?.teamId;
   if(!teamId) return res.json({success:true, projects:[]});
@@ -2741,7 +2741,7 @@ app.get('/api/team/projects', authMiddleware, (req,res)=>{
 });
 
 // POST /api/team/share-project — add an existing project to the team workspace
-app.post('/api/team/share-project', authMiddleware, (req,res)=>{
+app.post('/api/team/share-project', flexAuthMiddleware, (req,res)=>{
   const {teamId, projectId} = req.body;
   if(!teamId||!projectId) return res.status(400).json({success:false,error:'teamId and projectId required'});
   const teams=loadTeams();
@@ -2753,7 +2753,7 @@ app.post('/api/team/share-project', authMiddleware, (req,res)=>{
 });
 
 // POST /api/comments/add
-app.post('/api/comments/add', authMiddleware, (req,res)=>{
+app.post('/api/comments/add', flexAuthMiddleware, (req,res)=>{
   const {projectId, x, y, text} = req.body;
   if(!projectId||x==null||y==null||!text?.trim()) return res.status(400).json({success:false,error:'projectId, x, y, text required'});
   const comments=loadComments();
@@ -2774,13 +2774,13 @@ app.post('/api/comments/add', authMiddleware, (req,res)=>{
 });
 
 // GET /api/comments/:projectId
-app.get('/api/comments/:projectId', authMiddleware, (req,res)=>{
+app.get('/api/comments/:projectId', flexAuthMiddleware, (req,res)=>{
   const comments=loadComments();
   res.json({success:true, comments:comments[req.params.projectId]||[]});
 });
 
 // PATCH /api/comments/:commentId/resolve
-app.patch('/api/comments/:commentId/resolve', authMiddleware, (req,res)=>{
+app.patch('/api/comments/:commentId/resolve', flexAuthMiddleware, (req,res)=>{
   const comments=loadComments();
   for(const projectId of Object.keys(comments)){
     const idx=comments[projectId].findIndex(c=>c.id===req.params.commentId);
@@ -2794,7 +2794,7 @@ app.patch('/api/comments/:commentId/resolve', authMiddleware, (req,res)=>{
 });
 
 // POST /api/comments/:commentId/reply
-app.post('/api/comments/:commentId/reply', authMiddleware, (req,res)=>{
+app.post('/api/comments/:commentId/reply', flexAuthMiddleware, (req,res)=>{
   const {text}=req.body;
   if(!text?.trim()) return res.status(400).json({success:false,error:'text required'});
   const comments=loadComments();
@@ -2811,7 +2811,7 @@ app.post('/api/comments/:commentId/reply', authMiddleware, (req,res)=>{
 });
 
 // POST /api/projects/version — save a canvas snapshot
-app.post('/api/projects/version', authMiddleware, (req,res)=>{
+app.post('/api/projects/version', flexAuthMiddleware, (req,res)=>{
   const {projectId, label, canvasData} = req.body;
   if(!projectId||!canvasData) return res.status(400).json({success:false,error:'projectId and canvasData required'});
   const versions=loadVersions();
@@ -2832,14 +2832,14 @@ app.post('/api/projects/version', authMiddleware, (req,res)=>{
 });
 
 // GET /api/projects/:projectId/versions
-app.get('/api/projects/:projectId/versions', authMiddleware, (req,res)=>{
+app.get('/api/projects/:projectId/versions', flexAuthMiddleware, (req,res)=>{
   const versions=loadVersions();
   const list=(versions[req.params.projectId]||[]).map(v=>({...v, canvasData:undefined}));
   res.json({success:true, versions:list.reverse()}); // newest first
 });
 
 // GET /api/projects/:projectId/versions/:versionId — get full snapshot for restore
-app.get('/api/projects/:projectId/versions/:versionId', authMiddleware, (req,res)=>{
+app.get('/api/projects/:projectId/versions/:versionId', flexAuthMiddleware, (req,res)=>{
   const versions=loadVersions();
   const v=(versions[req.params.projectId]||[]).find(v=>v.id===req.params.versionId);
   if(!v) return res.status(404).json({success:false,error:'Version not found'});
@@ -2847,7 +2847,7 @@ app.get('/api/projects/:projectId/versions/:versionId', authMiddleware, (req,res
 });
 
 // PATCH /api/projects/:projectId/status
-app.patch('/api/projects/:projectId/status', authMiddleware, (req,res)=>{
+app.patch('/api/projects/:projectId/status', flexAuthMiddleware, (req,res)=>{
   const {status} = req.body;
   const VALID=['draft','review','approved'];
   if(!VALID.includes(status)) return res.status(400).json({success:false,error:'status must be draft, review, or approved'});
@@ -2873,7 +2873,7 @@ function getOAuth2Client(){
 }
 
 // GET /api/youtube/auth — generate consent URL and redirect
-app.get('/api/youtube/auth', authMiddleware, (req,res)=>{
+app.get('/api/youtube/auth', flexAuthMiddleware, (req,res)=>{
   const oauth2 = getOAuth2Client();
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',
@@ -2908,7 +2908,7 @@ app.get('/api/youtube/callback', async(req,res)=>{
 });
 
 // GET /api/youtube/thumbnails — fetch last 50 videos with stats
-app.get('/api/youtube/thumbnails', authMiddleware, async(req,res)=>{
+app.get('/api/youtube/thumbnails', flexAuthMiddleware, async(req,res)=>{
   const users = loadUsers();
   const user  = users[req.user.email];
   if(!user?.ytTokens) return res.status(403).json({success:false, error:'YouTube not connected', code:'YT_NOT_CONNECTED'});
@@ -3007,7 +3007,7 @@ app.get('/api/youtube/thumbnails', authMiddleware, async(req,res)=>{
 });
 
 // POST /api/youtube/analyze — send thumbnails + perf data to Claude, get insights
-app.post('/api/youtube/analyze', authMiddleware, async(req,res)=>{
+app.post('/api/youtube/analyze', flexAuthMiddleware, async(req,res)=>{
   const users = loadUsers();
   const user  = users[req.user.email];
   if(!user?.ytTokens) return res.status(403).json({success:false, error:'YouTube not connected', code:'YT_NOT_CONNECTED'});
@@ -3095,7 +3095,7 @@ Return ONLY valid JSON array, no markdown, no preamble.`;
 const ytSearchCache = new Map();
 
 // GET /api/youtube/search?q=<term>&maxResults=10
-app.get('/api/youtube/search', authMiddleware, async(req,res)=>{
+app.get('/api/youtube/search', flexAuthMiddleware, async(req,res)=>{
   const users = loadUsers();
   const user  = users[req.user.email];
   const plan  = (user?.plan||'free').toLowerCase();
@@ -3165,7 +3165,7 @@ app.get('/api/youtube/search', authMiddleware, async(req,res)=>{
 });
 
 // POST /api/analyze-competition — Claude Vision competitive analysis
-app.post('/api/analyze-competition', authMiddleware, async(req,res)=>{
+app.post('/api/analyze-competition', flexAuthMiddleware, async(req,res)=>{
   const quota = checkAndDecrementQuota(req.user.email);
   if(!quota.ok) return res.status(402).json({success:false,error:quota.message,code:quota.code});
 
