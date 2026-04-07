@@ -146,10 +146,11 @@ async function flexAuthMiddleware(req,res,next){
   }
 
   // 3. Last resort: decode without verify (Supabase tokens are trusted upstream)
+  // Preserve the full payload so user_metadata.is_pro etc. are available downstream.
   try{
     const payload=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());
     if(payload.email || payload.sub){
-      req.user={email:payload.email||payload.sub, id:payload.sub};
+      req.user={...payload, email:payload.email||payload.sub, id:payload.sub};
       return next();
     }
   }catch{}
@@ -700,6 +701,20 @@ app.post('/designs/save', flexAuthMiddleware,(req,res)=>{
   }catch(err){
     res.status(500).json({error:'Save failed'});
   }
+});
+
+// /designs/list is an alias kept for frontend compatibility
+app.get('/designs/list', flexAuthMiddleware,(req,res)=>{
+  const email=req.user?.email;
+  if(!email || typeof email!=='string' || !email.includes('@')){
+    return res.status(401).json({error:'Could not resolve user email from token'});
+  }
+  const designs=loadDesigns();
+  const list=(designs[email]||[]).map(d=>({
+    id:d.id,name:d.name,platform:d.platform,
+    created:d.created,updated:d.updated,thumbnail:d.thumbnail,
+  }));
+  res.json({designs:list});
 });
 
 app.get('/designs', flexAuthMiddleware,(req,res)=>{
