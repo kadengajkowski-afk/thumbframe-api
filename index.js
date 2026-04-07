@@ -3,8 +3,8 @@ const express    = require('express');
 const cors       = require('cors');
 const Replicate  = require('replicate');
 const { v4: uuidv4 } = require('uuid');
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
-const stripe     = require('stripe')(stripeSecretKey);
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim() || null;
+const stripe     = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 const fetch      = require('node-fetch');
 const FormData   = require('form-data');
 const fs         = require('fs');
@@ -781,65 +781,50 @@ app.post('/checkout', async(req,res)=>{
   }
 });
 
-// ── /api/create-checkout-session — 7-day free trial ──────────────────────────
-app.post('/api/create-checkout-session', flexAuthMiddleware, async(req,res)=>{
-  try{
-    if(!stripeSecretKey) return res.status(500).json({error:'Stripe not configured'});
-    const priceId=process.env.STRIPE_PRO_PRICE_ID?.trim();
-    if(!priceId) return res.status(500).json({error:'Price ID not configured'});
-
-    const users=loadUsers();
-    const userEmail=req.user.email;
-    const userRecord=users[userEmail]||{};
-    const stripeCustomerId=userRecord.stripeCustomerId||undefined;
-    const frontendUrl=process.env.FRONTEND_URL||'https://thumbframe.com';
-
-    const session=await stripe.checkout.sessions.create({
-      mode:'subscription',
-      line_items:[{price:priceId,quantity:1}],
-      subscription_data:{
-        trial_period_days:7,
-        metadata:{userId:req.user.id||userEmail},
+// ── Stripe Checkout ────────────────────────────────────────────────────────────
+app.post('/api/create-checkout-session', flexAuthMiddleware, async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured — STRIPE_SECRET_KEY missing' });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID, quantity: 1 }],
+      subscription_data: {
+        trial_period_days: 7,
+        metadata: { userId: req.user.id },
       },
-      payment_method_collection:'if_required',
-      ...(stripeCustomerId
-        ? {customer:stripeCustomerId}
-        : {customer_email:userEmail}
-      ),
-      success_url:`${frontendUrl}/account?checkout=success`,
-      cancel_url:`${frontendUrl}/pricing`,
-      allow_promotion_codes:true,
-      metadata:{userId:req.user.id||userEmail},
+      customer_email: req.user.email,
+      success_url: `${process.env.FRONTEND_URL || 'https://thumbframe.com'}/account?checkout=success`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://thumbframe.com'}/pricing`,
+      metadata: { userId: req.user.id },
     });
-    res.json({url:session.url});
-  }catch(err){
-    console.error('[create-checkout-session] error:', err);
-    res.status(500).json({error:err.message||'Checkout failed'});
+    console.log('[checkout] session created:', session.id, 'for', req.user.email);
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('[checkout] error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ── Blueprint: /api/create-portal-session ─────────────────────────────────────
-app.post('/api/create-portal-session', flexAuthMiddleware, async(req,res)=>{
-  try{
-    if(!stripeSecretKey) return res.status(500).json({error:'Stripe not configured'});
-
-    const users=loadUsers();
-    const userEmail=req.user.email;
-    const stripeCustomerId=(users[userEmail]||{}).stripeCustomerId;
-    if(!stripeCustomerId) return res.status(400).json({error:'No Stripe customer found'});
-
-    const session=await stripe.billingPortal.sessions.create({
-      customer:stripeCustomerId,
-      return_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/account`,
+// ── Stripe Customer Portal ─────────────────────────────────────────────────────
+app.post('/api/create-portal-session', flexAuthMiddleware, async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured — STRIPE_SECRET_KEY missing' });
+  try {
+    const users = loadUsers();
+    const stripeCustomerId = (users[req.user.email] || {}).stripeCustomerId;
+    if (!stripeCustomerId) return res.status(400).json({ error: 'No Stripe customer found. Complete a checkout first.' });
+    const session = await stripe.billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: `${process.env.FRONTEND_URL || 'https://thumbframe.com'}/account`,
     });
-    res.json({url:session.url});
-  }catch(err){
-    console.error('[create-portal-session] error:', err);
-    res.status(500).json({error:err.message||'Portal failed'});
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('[portal] error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
+  if(!stripe) return res.status(500).send('Stripe not configured');
   try{
     const sig=req.headers['stripe-signature'];
     const event=stripe.webhooks.constructEvent(req.body,sig,process.env.STRIPE_WEBHOOK_SECRET);
