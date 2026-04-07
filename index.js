@@ -894,22 +894,34 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
         saveUsers(users);
         console.log(`[webhook] user upgraded — email: ${customerEmail}, status: ${stripeStatus}, trialEndsAt: ${trialEndsAt}`);
 
-        // Supabase sync (non-fatal) — update both profiles table and auth user_metadata
+        // Supabase sync (non-fatal) — update profiles table AND auth user_metadata
         if (supabase) {
-          supabase.from('profiles')
-            .upsert({ email: customerEmail, is_pro: true }, { onConflict: 'email' })
-            .then(({error}) => { if(error) console.error('[webhook] Supabase profiles upsert failed:', error.message); })
-            .catch(()=>{});
-          // Also update auth user_metadata so the JWT picks up is_pro on next refresh
-          supabase.auth.admin.listUsers({ filter: `email.eq.${customerEmail}` })
-            .then(async ({data, error}) => {
-              if(error||!data?.users?.length){ console.error('[webhook] listUsers failed:', error?.message||'no user found'); return; }
-              const uid = data.users[0].id;
-              const {error:ue} = await supabase.auth.admin.updateUserById(uid, { user_metadata: { is_pro: true } });
-              if(ue) console.error('[webhook] updateUserById failed:', ue.message);
-              else console.log(`[webhook] Supabase auth metadata updated for ${customerEmail}`);
-            })
-            .catch(e => console.error('[webhook] auth admin sync error:', e.message));
+          (async () => {
+            try {
+              // 1. Profiles table (requirePro reads this as source of truth)
+              const { error: pe } = await supabase.from('profiles')
+                .upsert({
+                  email: customerEmail,
+                  is_pro: true,
+                  plan: 'pro',
+                  subscription_status: stripeStatus,
+                  stripe_customer_id: stripeCustomerId,
+                }, { onConflict: 'email' });
+              if (pe) console.error('[webhook] profiles upsert failed:', pe.message);
+              else console.log(`[webhook] profiles updated for ${customerEmail}`);
+
+              // 2. Auth user_metadata — listUsers() without filter, then find by email
+              const { data: authData } = await supabase.auth.admin.listUsers();
+              const authUser = authData?.users?.find(u => u.email === customerEmail);
+              if (authUser) {
+                const { error: ue } = await supabase.auth.admin.updateUserById(authUser.id, { user_metadata: { is_pro: true } });
+                if (ue) console.error('[webhook] updateUserById failed:', ue.message);
+                else console.log(`[webhook] auth metadata updated for ${customerEmail}`);
+              } else {
+                console.warn(`[webhook] auth user not found for ${customerEmail} — profiles table updated but JWT won't reflect Pro until re-login`);
+              }
+            } catch(e) { console.error('[webhook] Supabase sync error:', e.message); }
+          })();
         }
 
         // Welcome email (non-fatal)
@@ -942,39 +954,56 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
       case 'customer.subscription.updated': {
         const sub = event.data.object;
         const cid = sub.customer;
+        const isPro = sub.status === 'active' || sub.status === 'trialing';
+        const newPlan = isPro ? 'pro' : 'free';
+        // Update users.json cache
         const usersU = loadUsers();
         const entryU = Object.values(usersU).find(u => u.stripeCustomerId === cid);
         if (entryU) {
-          if (sub.status === 'active') {
-            // Trial converted to paid, or renewal
-            entryU.plan        = 'pro';
-            entryU.stripeStatus = 'active';
-            entryU.trialEndsAt  = null;
-          } else if (sub.status === 'trialing') {
-            entryU.stripeStatus = 'trialing';
-            entryU.trialEndsAt  = new Date(sub.trial_end * 1000).toISOString();
-          } else if (sub.status === 'canceled' || sub.status === 'unpaid' || sub.status === 'incomplete_expired') {
-            entryU.plan        = 'free';
-            entryU.stripeStatus = sub.status;
-            entryU.trialEndsAt  = null;
-          } else {
-            entryU.stripeStatus = sub.status;
-          }
+          entryU.plan = newPlan;
+          entryU.stripeStatus = sub.status;
+          entryU.trialEndsAt = (sub.status === 'trialing' && sub.trial_end) ? new Date(sub.trial_end * 1000).toISOString() : null;
           saveUsers(usersU);
-          console.log(`[webhook] subscription.updated — customer: ${cid}, status: ${sub.status}`);
+        }
+        // Supabase sync (persistent — survives restarts)
+        if (supabase) {
+          try {
+            const customer = await stripe.customers.retrieve(cid);
+            const custEmail = customer.email;
+            if (custEmail) {
+              await supabase.from('profiles')
+                .upsert({ email: custEmail, is_pro: isPro, plan: newPlan, subscription_status: sub.status }, { onConflict: 'email' });
+              // Refresh JWT metadata so user's next token refresh picks it up
+              const { data: authData } = await supabase.auth.admin.listUsers();
+              const authUser = authData?.users?.find(u => u.email === custEmail);
+              if (authUser) await supabase.auth.admin.updateUserById(authUser.id, { user_metadata: { is_pro: isPro } });
+              console.log(`[webhook] subscription.updated — ${custEmail}, status: ${sub.status}, plan: ${newPlan}`);
+            }
+          } catch(e) { console.error('[webhook] subscription.updated Supabase sync failed:', e.message); }
         }
         break;
       }
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
         const cid = sub.customer;
+        // Update users.json cache
         const users2 = loadUsers();
         const entry = Object.values(users2).find(u => u.stripeCustomerId === cid);
-        if (entry) {
-          entry.plan = 'free';
-          entry.stripeStatus = 'canceled';
-          saveUsers(users2);
-          console.log(`[webhook] subscription canceled for customer ${cid}`);
+        if (entry) { entry.plan = 'free'; entry.stripeStatus = 'canceled'; saveUsers(users2); }
+        // Supabase sync (persistent)
+        if (supabase) {
+          try {
+            const customer = await stripe.customers.retrieve(cid);
+            const custEmail = customer.email;
+            if (custEmail) {
+              await supabase.from('profiles')
+                .upsert({ email: custEmail, is_pro: false, plan: 'free', subscription_status: 'canceled' }, { onConflict: 'email' });
+              const { data: authData } = await supabase.auth.admin.listUsers();
+              const authUser = authData?.users?.find(u => u.email === custEmail);
+              if (authUser) await supabase.auth.admin.updateUserById(authUser.id, { user_metadata: { is_pro: false } });
+              console.log(`[webhook] subscription canceled — ${custEmail}`);
+            }
+          } catch(e) { console.error('[webhook] subscription.deleted Supabase sync failed:', e.message); }
         }
         break;
       }
@@ -1021,7 +1050,7 @@ app.post('/api/admin/force-pro', async(req,res)=>{
   // 2. Supabase profiles table
   let profilesOk = false;
   if(supabase){
-    const {error:pe} = await supabase.from('profiles').upsert({email, is_pro:true},{onConflict:'email'});
+    const {error:pe} = await supabase.from('profiles').upsert({email, is_pro:true, plan:'pro', subscription_status:'active'},{onConflict:'email'});
     profilesOk = !pe;
     if(pe) console.error('[force-pro] profiles upsert failed:', pe.message);
   }
@@ -2291,20 +2320,43 @@ app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
 
 // ── Prompt-to-Thumbnail Engine ────────────────────────────────────────────────
 
-// Helper: check Pro plan, return error response if not
-function requirePro(req, res) {
+// Helper: check Pro plan — checks users.json → JWT user_metadata → Supabase profiles (source of truth)
+async function requirePro(req, res) {
+  const email = req.user?.email;
+
+  // 1. JWT user_metadata (fastest — already decoded by flexAuthMiddleware)
+  if (req.user?.user_metadata?.is_pro === true) return false;
+
+  // 2. In-memory store (fast, but ephemeral — wiped on Railway redeploy)
   const users = loadUsers();
-  const plan = (users[req.user?.email]?.plan || (req.user?.user_metadata?.is_pro === true ? 'pro' : null) || 'free').toLowerCase();
-  if (plan === 'free' || plan === 'starter') {
-    res.status(403).json({
-      success: false,
-      error: 'Prompt-to-Thumbnail requires a Pro plan.',
-      code: 'PLAN_REQUIRED',
-      requiredPlan: 'pro',
-    });
-    return true; // blocked
+  const localPlan = users[email]?.plan?.toLowerCase();
+  if (localPlan === 'pro' || localPlan === 'agency') return false;
+
+  // 3. Supabase profiles (authoritative source of truth — persists across restarts)
+  if (supabase && email) {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('is_pro, plan')
+        .eq('email', email)
+        .maybeSingle();
+      if (data?.is_pro === true || data?.plan === 'pro' || data?.plan === 'agency') {
+        // Cache in local store so next check is faster
+        if (!users[email]) users[email] = { email };
+        users[email].plan = 'pro';
+        saveUsers(users);
+        return false;
+      }
+    } catch(e) { /* non-fatal — fall through to deny */ }
   }
-  return false; // ok
+
+  res.status(403).json({
+    success: false,
+    error: 'This feature requires a Pro plan.',
+    code: 'PLAN_REQUIRED',
+    requiredPlan: 'pro',
+  });
+  return true; // blocked
 }
 
 // Helper: apply anti-slop Sharp steps to a buffer, return processed buffer
@@ -2382,7 +2434,7 @@ function buildNicheCalibration(niche) {
 // Claude decomposes a prompt into compositable components
 app.post('/api/thumbnail/prompt-plan', flexAuthMiddleware, async (req, res) => {
   try {
-    if (requirePro(req, res)) return;
+    if (await requirePro(req, res)) return;
 
     const { prompt, niche, hasSubjectPhoto = false } = req.body;
     if (!prompt?.trim()) return res.status(400).json({ success: false, error: 'prompt required', code: 'INVALID_INPUT' });
@@ -2459,7 +2511,7 @@ For text_layer, include "content" (the text string) and "style" ({ "font": "Impa
 // Generate a single component (background, prop, text, etc.)
 app.post('/api/thumbnail/generate-component', flexAuthMiddleware, async (req, res) => {
   try {
-    if (requirePro(req, res)) return;
+    if (await requirePro(req, res)) return;
 
     const { type, generationPrompt, content, style } = req.body;
     if (!type) return res.status(400).json({ success: false, error: 'type required', code: 'INVALID_INPUT' });
@@ -2557,7 +2609,7 @@ app.post('/api/thumbnail/generate-component', flexAuthMiddleware, async (req, re
 // Sharp pixel-level post-processing pipeline
 app.post('/api/thumbnail/anti-slop-process', flexAuthMiddleware, async (req, res) => {
   try {
-    if (requirePro(req, res)) return;
+    if (await requirePro(req, res)) return;
 
     const { imageBase64, steps = ['all'] } = req.body;
     if (!imageBase64) return res.status(400).json({ success: false, error: 'imageBase64 required', code: 'INVALID_INPUT' });
