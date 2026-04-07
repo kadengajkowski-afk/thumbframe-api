@@ -2274,6 +2274,290 @@ app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
   }
 });
 
+// ── Prompt-to-Thumbnail Engine ────────────────────────────────────────────────
+
+// Helper: check Pro plan, return error response if not
+function requirePro(req, res) {
+  const users = loadUsers();
+  const plan = (users[req.user?.email]?.plan || 'free').toLowerCase();
+  if (plan === 'free' || plan === 'starter') {
+    res.status(403).json({
+      success: false,
+      error: 'Prompt-to-Thumbnail requires a Pro plan.',
+      code: 'PLAN_REQUIRED',
+      requiredPlan: 'pro',
+    });
+    return true; // blocked
+  }
+  return false; // ok
+}
+
+// Helper: apply anti-slop Sharp steps to a buffer, return processed buffer
+async function applyAntiSlopSteps(buf, steps) {
+  // Expand 'all' shorthand
+  const expanded = steps.flatMap(s =>
+    s === 'all' ? ['highlight_recovery', 'depth_sharpen', 'chromatic_aberration', 'grain'] : [s]
+  );
+
+  let current = buf;
+
+  for (const step of expanded) {
+    if (step === 'grain') {
+      const { data, info } = await sharp(current).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width, height } = info;
+      const out = Buffer.from(data);
+      const strength = 8; // ±8 out of 255 ≈ 3%
+      for (let i = 0; i < out.length; i += 4) {
+        const n = Math.round((Math.random() - 0.5) * 2 * strength);
+        out[i]     = Math.max(0, Math.min(255, out[i]     + n));
+        out[i + 1] = Math.max(0, Math.min(255, out[i + 1] + n));
+        out[i + 2] = Math.max(0, Math.min(255, out[i + 2] + n));
+      }
+      current = await sharp(out, { raw: { width, height, channels: 4 } })
+        .removeAlpha().jpeg({ quality: 95 }).toBuffer();
+
+    } else if (step === 'chromatic_aberration') {
+      const { data, info } = await sharp(current).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width, height } = info;
+      const ch = 4;
+      const out = Buffer.from(data);
+      const offset = 1; // 1px channel offset
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * ch;
+          const rSrcX = Math.max(0, x - offset);
+          const bSrcX = Math.min(width - 1, x + offset);
+          out[i]     = data[(y * width + rSrcX) * ch];       // R shifted right
+          out[i + 2] = data[(y * width + bSrcX) * ch + 2];   // B shifted left
+        }
+      }
+      current = await sharp(out, { raw: { width, height, channels: ch } })
+        .removeAlpha().jpeg({ quality: 95 }).toBuffer();
+
+    } else if (step === 'depth_sharpen') {
+      current = await sharp(current)
+        .sharpen({ sigma: 1.2, m1: 1.5, m2: 0.5 })
+        .jpeg({ quality: 95 }).toBuffer();
+
+    } else if (step === 'highlight_recovery') {
+      // Pull down brightest 5% of tonal range slightly
+      current = await sharp(current)
+        .modulate({ brightness: 0.97 })
+        .jpeg({ quality: 95 }).toBuffer();
+    }
+  }
+
+  return current;
+}
+
+// Niche calibration string for Claude injection
+function buildNicheCalibration(niche) {
+  const map = {
+    gaming:    'Dark/neon backgrounds, electric colors (cyan/purple/yellow), dense composition. Font: Impact bold with stroke. Mood: high-energy, extreme, competitive.',
+    tech:      'Minimal dark workspace, clean product shots, muted palette with breathing room. Font: Montserrat clean. Mood: curious, authoritative, precise.',
+    vlog:      'Warm gradients, natural outdoor settings, golden hour. Font: friendly rounded. Mood: authentic, relatable, personal.',
+    education: 'Clean bright setting, professional desk/whiteboard. Font: professional sans-serif. Mood: confident, trustworthy, clear.',
+    cooking:   'Warm kitchen tones, vibrant food colors, natural light feel. Font: warm serif or clean sans. Mood: appetizing, inviting.',
+    fitness:   'Dramatic gym lighting, strong contrast, bold silhouettes. Font: bold condensed. Mood: intense, aspirational, motivational.',
+  };
+  return map[niche] ? `NICHE: ${niche}. Style: ${map[niche]}` : 'General YouTube thumbnail — clean, high-contrast, attention-grabbing.';
+}
+
+// POST /api/thumbnail/prompt-plan
+// Claude decomposes a prompt into compositable components
+app.post('/api/thumbnail/prompt-plan', flexAuthMiddleware, async (req, res) => {
+  try {
+    if (requirePro(req, res)) return;
+
+    const { prompt, niche, hasSubjectPhoto = false } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ success: false, error: 'prompt required', code: 'INVALID_INPUT' });
+
+    // Decrement quota for the Claude call
+    const quota = checkAndDecrementQuota(req.user.email);
+    if (!quota.ok) return res.status(429).json({ success: false, error: quota.message, code: quota.code });
+
+    // Resolve niche from stored profile if not provided
+    const effectiveNiche = niche || getUserNiche(req.user.email) || 'general';
+    const nicheCalibration = buildNicheCalibration(effectiveNiche);
+
+    const systemPrompt = `You are a YouTube thumbnail composition planner. Break the user's thumbnail description into individual visual components that will be generated separately and composited as layers.
+
+STRICT RULES:
+1. If prompt mentions a person/face/human/creator/me/I: add ONE component with type "photo_required" — NEVER generate a person
+2. NEVER put text/words/titles in any "generate" or "asset_or_generate" prompts — always use "text_layer" type
+3. Keep background generation prompts cinematic, atmospheric, no people, no text
+4. Props/objects: always "isolated on pure black background, no text, no watermarks" in the prompt
+5. Backgrounds: always include "no people, no faces, no text, no logos, atmospheric lighting" in the prompt
+6. Maximum 6 components total
+
+${nicheCalibration}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "components": [
+    {
+      "id": "background",
+      "type": "generate",
+      "generationPrompt": "...",
+      "position": "fill",
+      "notes": "..."
+    }
+  ],
+  "composition": {
+    "layout": "subject_left_text_right",
+    "colorMood": "dark_dramatic",
+    "style": "MrBeast"
+  }
+}
+
+Valid types: "generate" (backgrounds/scenes), "photo_required" (person — never generate), "asset_or_generate" (props/objects), "text_layer" (ALL text), "effect_layer" (vignette/rim light)
+For text_layer, include "content" (the text string) and "style" ({ "font": "Impact", "fill": "#FFFFFF", "strokes": [{"color": "#000000", "width": 8}] })`;
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Create a YouTube thumbnail: ${prompt}` }],
+    });
+
+    const raw = message.content[0]?.text?.trim() || '';
+    // Strip any markdown code fences
+    const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    let plan;
+    try {
+      plan = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('[PROMPT-PLAN] JSON parse failed:', raw.slice(0, 200));
+      return res.status(500).json({ success: false, error: 'Composition planning returned invalid JSON', code: 'PARSE_ERROR' });
+    }
+
+    console.log(`[PROMPT-PLAN] ${req.user.email} — ${plan.components?.length || 0} components, layout: ${plan.composition?.layout}`);
+    res.json({ success: true, components: plan.components || [], composition: plan.composition || {}, niche: effectiveNiche, remaining: quota.remaining });
+
+  } catch (err) {
+    console.error('[PROMPT-PLAN] Error:', err.message);
+    res.status(500).json({ success: false, error: `Prompt planning failed: ${err.message}`, code: 'API_FAILURE' });
+  }
+});
+
+// POST /api/thumbnail/generate-component
+// Generate a single component (background, prop, text, etc.)
+app.post('/api/thumbnail/generate-component', flexAuthMiddleware, async (req, res) => {
+  try {
+    if (requirePro(req, res)) return;
+
+    const { type, generationPrompt, content, style } = req.body;
+    if (!type) return res.status(400).json({ success: false, error: 'type required', code: 'INVALID_INPUT' });
+
+    // text_layer and effect_layer don't need generation
+    if (type === 'text_layer') {
+      return res.json({ success: true, type, textContent: content || generationPrompt || '', style: style || {} });
+    }
+    if (type === 'effect_layer') {
+      return res.json({ success: true, type, effectParams: { vignette: true, rimLight: false } });
+    }
+    if (type === 'photo_required') {
+      return res.json({
+        success: true,
+        type,
+        requiresUpload: true,
+        instructions: 'Upload your photo for best results. AI-generated faces get 2-3× fewer clicks.',
+      });
+    }
+
+    if (!generationPrompt?.trim()) {
+      return res.status(400).json({ success: false, error: 'generationPrompt required for generate/asset types', code: 'INVALID_INPUT' });
+    }
+
+    // Decrement quota — this is a real generation call
+    const quota = checkAndDecrementQuota(req.user.email);
+    if (!quota.ok) return res.status(429).json({ success: false, error: quota.message, code: quota.code });
+
+    let fullPrompt;
+    let applyBlur = false;
+
+    if (type === 'generate') {
+      // Background — enforce no-people, atmospheric
+      fullPrompt = `${generationPrompt}. No people, no faces, no text, no logos, no UI, atmospheric, cinematic lighting, high quality, photorealistic.`;
+      applyBlur = true; // depth-of-field blur for backgrounds
+    } else if (type === 'asset_or_generate') {
+      // Prop/object — isolated on black
+      fullPrompt = `${generationPrompt}, photorealistic, studio photography, isolated on pure black background, no text, no watermarks, clean product shot.`;
+    } else if (type === 'generate_person') {
+      // "Generate Anyway" path — Flux Pro, isolated person
+      fullPrompt = `${generationPrompt}, single person, full body or torso, isolated on pure white background, no background clutter, photorealistic, professional photo.`;
+    } else {
+      fullPrompt = generationPrompt;
+    }
+
+    let imageUrl;
+
+    // Provider pipeline: DALL-E 3 first, Flux fallback
+    const providers = type === 'generate_person'
+      ? [
+          { name: 'replicate-flux', fn: () => generateWithReplicateFlux(fullPrompt) },
+          { name: 'dall-e-3',       fn: () => generateWithDallE3(fullPrompt, '1024x1024', 'vivid') },
+        ]
+      : [
+          { name: 'dall-e-3',       fn: () => generateWithDallE3(fullPrompt, type === 'generate' ? '1792x1024' : '1024x1024', 'vivid') },
+          { name: 'replicate-flux', fn: () => generateWithReplicateFlux(fullPrompt) },
+        ];
+
+    for (const p of providers) {
+      try {
+        const result = await p.fn();
+        imageUrl = result.imageUrl;
+        break;
+      } catch (e) {
+        console.error(`[GEN-COMPONENT] ${p.name} failed:`, e.message);
+      }
+    }
+    if (!imageUrl) throw new Error('All generation providers failed');
+
+    // Fetch and process with Sharp
+    const imgFetch = await fetch(imageUrl);
+    let imgBuf = Buffer.from(await imgFetch.arrayBuffer());
+
+    // Resize to YouTube thumbnail size (backgrounds full, assets bounded)
+    if (type === 'generate') {
+      imgBuf = await sharp(imgBuf).resize(1280, 720, { fit: 'cover' }).jpeg({ quality: 93 }).toBuffer();
+      if (applyBlur) {
+        imgBuf = await sharp(imgBuf).blur(1.5).jpeg({ quality: 93 }).toBuffer(); // depth-of-field
+      }
+    } else {
+      imgBuf = await sharp(imgBuf).resize(600, 600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 93 }).toBuffer();
+    }
+
+    const imageBase64 = imgBuf.toString('base64');
+    console.log(`[GEN-COMPONENT] ${req.user.email} — type: ${type}, size: ${Math.round(imageBase64.length / 1024)}KB`);
+    res.json({ success: true, type, imageBase64, remaining: quota.remaining });
+
+  } catch (err) {
+    console.error('[GEN-COMPONENT] Error:', err.message);
+    res.status(500).json({ success: false, error: `Component generation failed: ${err.message}`, code: 'API_FAILURE' });
+  }
+});
+
+// POST /api/thumbnail/anti-slop-process
+// Sharp pixel-level post-processing pipeline
+app.post('/api/thumbnail/anti-slop-process', flexAuthMiddleware, async (req, res) => {
+  try {
+    if (requirePro(req, res)) return;
+
+    const { imageBase64, steps = ['all'] } = req.body;
+    if (!imageBase64) return res.status(400).json({ success: false, error: 'imageBase64 required', code: 'INVALID_INPUT' });
+
+    let buf = Buffer.from(imageBase64, 'base64');
+    buf = await applyAntiSlopSteps(buf, steps);
+
+    res.json({ success: true, processedImageBase64: buf.toString('base64') });
+
+  } catch (err) {
+    console.error('[ANTI-SLOP] Error:', err.message);
+    res.status(500).json({ success: false, error: `Anti-slop processing failed: ${err.message}`, code: 'API_FAILURE' });
+  }
+});
+
 // ── Feature L: Team Collaboration & Brand Kit (Expanded) ──────────────────
 
 // Middleware: Agency plan required
