@@ -478,13 +478,14 @@ Rules:
 // ── Background remover ─────────────────────────────────────────────────────────
 app.post('/remove-bg', async(req,res)=>{
   try{
-    const {imageUrl}=req.body;
-    if(!imageUrl) return res.status(400).json({error:'No image'});
+    const {imageUrl, image}=req.body;
+    const src=image||imageUrl;
+    if(!src) return res.status(400).json({error:'No image'});
     let imageBuffer;
-    if(imageUrl.startsWith('data:')){
-      imageBuffer=Buffer.from(imageUrl.split(',')[1],'base64');
+    if(src.startsWith('data:')){
+      imageBuffer=Buffer.from(src.split(',')[1],'base64');
     }else{
-      const r=await fetch(imageUrl);
+      const r=await fetch(src);
       imageBuffer=Buffer.from(await r.arrayBuffer());
     }
     const formData=new FormData();
