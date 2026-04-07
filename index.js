@@ -675,7 +675,7 @@ app.post('/auth/reset-password', async(req,res)=>{
 });
 
 // ── Designs ────────────────────────────────────────────────────────────────────
-app.post('/designs/save', authMiddleware,(req,res)=>{
+app.post('/designs/save', flexAuthMiddleware,(req,res)=>{
   try{
     const {name,platform,layers,brightness,contrast,saturation,hue,thumbnail}=req.body;
     const designs=loadDesigns();
@@ -698,7 +698,7 @@ app.post('/designs/save', authMiddleware,(req,res)=>{
   }
 });
 
-app.get('/designs', authMiddleware,(req,res)=>{
+app.get('/designs', flexAuthMiddleware,(req,res)=>{
   const designs=loadDesigns();
   const list=(designs[req.user.email]||[]).map(d=>({
     id:d.id,name:d.name,platform:d.platform,
@@ -707,14 +707,14 @@ app.get('/designs', authMiddleware,(req,res)=>{
   res.json({designs:list});
 });
 
-app.get('/designs/:id', authMiddleware,(req,res)=>{
+app.get('/designs/:id', flexAuthMiddleware,(req,res)=>{
   const designs=loadDesigns();
   const design=(designs[req.user.email]||[]).find(d=>d.id===req.params.id);
   if(!design) return res.status(404).json({error:'Not found'});
   res.json({design});
 });
 
-app.delete('/designs/:id', authMiddleware,(req,res)=>{
+app.delete('/designs/:id', flexAuthMiddleware,(req,res)=>{
   const designs=loadDesigns();
   if(!designs[req.user.email]) return res.status(404).json({error:'No designs'});
   designs[req.user.email]=designs[req.user.email].filter(d=>d.id!==req.params.id);
