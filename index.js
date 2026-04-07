@@ -677,20 +677,24 @@ app.post('/auth/reset-password', async(req,res)=>{
 // ── Designs ────────────────────────────────────────────────────────────────────
 app.post('/designs/save', flexAuthMiddleware,(req,res)=>{
   try{
+    const email=req.user?.email;
+    if(!email || typeof email!=='string' || !email.includes('@')){
+      return res.status(401).json({error:'Could not resolve user email from token'});
+    }
     const {name,platform,layers,brightness,contrast,saturation,hue,thumbnail}=req.body;
     const designs=loadDesigns();
-    if(!designs[req.user.email]) designs[req.user.email]=[];
+    if(!designs[email]) designs[email]=[];
     const id=Date.now().toString();
-    const existing=designs[req.user.email].findIndex(d=>d.name===name);
+    const existing=designs[email].findIndex(d=>d.name===name);
     const design={id,name,platform,layers,brightness,contrast,saturation,hue,
       thumbnail:thumbnail||null,created:new Date().toLocaleDateString(),
       updated:new Date().toISOString()};
     if(existing>=0){
-      designs[req.user.email][existing]={...designs[req.user.email][existing],...design};
+      designs[email][existing]={...designs[email][existing],...design};
     }else{
-      designs[req.user.email].unshift(design);
+      designs[email].unshift(design);
     }
-    designs[req.user.email]=designs[req.user.email].slice(0,50);
+    designs[email]=designs[email].slice(0,50);
     saveDesigns(designs);
     res.json({success:true,id:design.id});
   }catch(err){
@@ -699,8 +703,12 @@ app.post('/designs/save', flexAuthMiddleware,(req,res)=>{
 });
 
 app.get('/designs', flexAuthMiddleware,(req,res)=>{
+  const email=req.user?.email;
+  if(!email || typeof email!=='string' || !email.includes('@')){
+    return res.status(401).json({error:'Could not resolve user email from token'});
+  }
   const designs=loadDesigns();
-  const list=(designs[req.user.email]||[]).map(d=>({
+  const list=(designs[email]||[]).map(d=>({
     id:d.id,name:d.name,platform:d.platform,
     created:d.created,updated:d.updated,thumbnail:d.thumbnail,
   }));
