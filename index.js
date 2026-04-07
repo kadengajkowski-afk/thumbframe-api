@@ -2580,4 +2580,6 @@ app.post('/api/newsletter/subscribe', async(req,res)=>{
   res.json({success:true,message:'Subscribed'});
 });
 
+app.get('/api/ping', (req, res) => res.json({ pong: true, time: Date.now() }));
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
