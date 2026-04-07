@@ -783,7 +783,11 @@ app.post('/checkout', async(req,res)=>{
 
 // ── Stripe Checkout ────────────────────────────────────────────────────────────
 app.post('/api/create-checkout-session', flexAuthMiddleware, async (req, res) => {
+  console.log('[checkout] hit — user:', req.user?.email, 'stripe:', !!stripe);
+
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured — STRIPE_SECRET_KEY missing' });
+
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
