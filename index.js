@@ -2279,7 +2279,7 @@ app.post('/api/generate-variants', authMiddleware, async(req,res)=>{
 // Helper: check Pro plan, return error response if not
 function requirePro(req, res) {
   const users = loadUsers();
-  const plan = (users[req.user?.email]?.plan || 'free').toLowerCase();
+  const plan = (users[req.user?.email]?.plan || (req.user?.user_metadata?.is_pro === true ? 'pro' : null) || 'free').toLowerCase();
   if (plan === 'free' || plan === 'starter') {
     res.status(403).json({
       success: false,
