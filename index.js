@@ -781,9 +781,23 @@ app.post('/checkout', async(req,res)=>{
   }
 });
 
+// ── Debug Checkout ─────────────────────────────────────────────────────────────
+app.post('/api/debug-checkout', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.replace('Bearer ', '');
+  res.json({
+    hasAuthHeader: !!authHeader,
+    hasToken: !!token,
+    tokenLength: token?.length,
+    hasStripe: !!stripe,
+    stripePriceId: process.env.STRIPE_PRO_PRICE_ID || 'MISSING',
+    frontendUrl: process.env.FRONTEND_URL || 'MISSING',
+  });
+});
+
 // ── Stripe Checkout ────────────────────────────────────────────────────────────
 app.post('/api/create-checkout-session', flexAuthMiddleware, async (req, res) => {
-  console.log('[checkout] hit — user:', req.user?.email, 'stripe:', !!stripe);
+  console.log('[checkout] HANDLER REACHED — user:', JSON.stringify(req.user), 'stripe:', !!stripe);
 
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured — STRIPE_SECRET_KEY missing' });
