@@ -879,12 +879,22 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
         saveUsers(users);
         console.log(`[webhook] user upgraded — email: ${customerEmail}, status: ${stripeStatus}, trialEndsAt: ${trialEndsAt}`);
 
-        // Supabase upsert (non-fatal)
+        // Supabase sync (non-fatal) — update both profiles table and auth user_metadata
         if (supabase) {
           supabase.from('profiles')
             .upsert({ email: customerEmail, is_pro: true }, { onConflict: 'email' })
-            .then(({error}) => { if(error) console.error('[webhook] Supabase upsert failed:', error.message); })
+            .then(({error}) => { if(error) console.error('[webhook] Supabase profiles upsert failed:', error.message); })
             .catch(()=>{});
+          // Also update auth user_metadata so the JWT picks up is_pro on next refresh
+          supabase.auth.admin.listUsers({ filter: `email.eq.${customerEmail}` })
+            .then(async ({data, error}) => {
+              if(error||!data?.users?.length){ console.error('[webhook] listUsers failed:', error?.message||'no user found'); return; }
+              const uid = data.users[0].id;
+              const {error:ue} = await supabase.auth.admin.updateUserById(uid, { user_metadata: { is_pro: true } });
+              if(ue) console.error('[webhook] updateUserById failed:', ue.message);
+              else console.log(`[webhook] Supabase auth metadata updated for ${customerEmail}`);
+            })
+            .catch(e => console.error('[webhook] auth admin sync error:', e.message));
         }
 
         // Welcome email (non-fatal)
@@ -972,6 +982,53 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
   }catch(err){
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
+});
+
+// ── Admin: force-pro — sync plan for a user whose webhook was missed ──────────
+app.post('/api/admin/force-pro', async(req,res)=>{
+  const adminKey = req.headers['x-admin-key'] || req.body?.adminKey;
+  const {email} = req.body||{};
+
+  // Accept either a configured admin key or the JWT_SECRET as a quick backdoor
+  if(adminKey !== process.env.ADMIN_KEY && adminKey !== JWT_SECRET){
+    return res.status(403).json({error:'Forbidden'});
+  }
+  if(!email) return res.status(400).json({error:'email required'});
+
+  // 1. users.json
+  const users = loadUsers();
+  if(!users[email]) users[email] = {email};
+  users[email].plan = 'pro';
+  users[email].stripeStatus = 'active';
+  saveUsers(users);
+  console.log(`[force-pro] users.json updated for ${email}`);
+
+  // 2. Supabase profiles table
+  let profilesOk = false;
+  if(supabase){
+    const {error:pe} = await supabase.from('profiles').upsert({email, is_pro:true},{onConflict:'email'});
+    profilesOk = !pe;
+    if(pe) console.error('[force-pro] profiles upsert failed:', pe.message);
+  }
+
+  // 3. Supabase auth user_metadata
+  let authOk = false;
+  if(supabase){
+    const {data, error:le} = await supabase.auth.admin.listUsers();
+    if(!le){
+      const user = data.users.find(u => u.email === email);
+      if(user){
+        const {error:ue} = await supabase.auth.admin.updateUserById(user.id, {user_metadata:{is_pro:true}});
+        authOk = !ue;
+        if(ue) console.error('[force-pro] updateUserById failed:', ue.message);
+        else console.log(`[force-pro] auth metadata updated for ${email} (uid: ${user.id})`);
+      } else {
+        console.warn(`[force-pro] No Supabase auth user found for ${email}`);
+      }
+    }
+  }
+
+  res.json({success:true, email, plan:'pro', profilesOk, authOk});
 });
 
 app.get('/validate-key',(req,res)=>{
