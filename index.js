@@ -773,7 +773,7 @@ app.post('/checkout', async(req,res)=>{
   }
 });
 
-// ── Blueprint: /api/create-checkout-session ───────────────────────────────────
+// ── /api/create-checkout-session — 7-day free trial ──────────────────────────
 app.post('/api/create-checkout-session', flexAuthMiddleware, async(req,res)=>{
   try{
     if(!stripeSecretKey) return res.status(500).json({error:'Stripe not configured'});
@@ -784,19 +784,24 @@ app.post('/api/create-checkout-session', flexAuthMiddleware, async(req,res)=>{
     const userEmail=req.user.email;
     const userRecord=users[userEmail]||{};
     const stripeCustomerId=userRecord.stripeCustomerId||undefined;
+    const frontendUrl=process.env.FRONTEND_URL||'https://thumbframe.com';
 
     const session=await stripe.checkout.sessions.create({
       mode:'subscription',
       line_items:[{price:priceId,quantity:1}],
+      subscription_data:{
+        trial_period_days:7,
+        metadata:{userId:req.user.id||userEmail},
+      },
+      payment_method_collection:'if_required',
       ...(stripeCustomerId
         ? {customer:stripeCustomerId}
         : {customer_email:userEmail}
       ),
-      success_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/account?checkout=success`,
-      cancel_url:`${process.env.FRONTEND_URL||'https://thumbframe.com'}/pricing`,
+      success_url:`${frontendUrl}/account?checkout=success`,
+      cancel_url:`${frontendUrl}/pricing`,
       allow_promotion_codes:true,
       metadata:{userId:req.user.id||userEmail},
-      subscription_data:{metadata:{userId:req.user.id||userEmail}},
     });
     res.json({url:session.url});
   }catch(err){
@@ -840,14 +845,28 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
 
         if (!customerEmail) { console.error('[webhook] No email in session'); break; }
 
+        // Check if subscription has a trial
+        let stripeStatus = 'active';
+        let trialEndsAt = null;
+        if (session.subscription) {
+          try {
+            const sub = await stripe.subscriptions.retrieve(session.subscription);
+            if (sub.trial_end && sub.status === 'trialing') {
+              stripeStatus = 'trialing';
+              trialEndsAt = new Date(sub.trial_end * 1000).toISOString();
+            }
+          } catch(e) { console.error('[webhook] subscription retrieve failed:', e.message); }
+        }
+
         // Persist to users.json
         const users = loadUsers();
         if (!users[customerEmail]) users[customerEmail] = { email: customerEmail };
         users[customerEmail].plan            = 'pro';
-        users[customerEmail].stripeStatus    = 'active';
+        users[customerEmail].stripeStatus    = stripeStatus;
+        users[customerEmail].trialEndsAt     = trialEndsAt;
         users[customerEmail].stripeCustomerId= stripeCustomerId || users[customerEmail].stripeCustomerId;
         saveUsers(users);
-        console.log(`[webhook] users.json updated for ${customerEmail}`);
+        console.log(`[webhook] user upgraded — email: ${customerEmail}, status: ${stripeStatus}, trialEndsAt: ${trialEndsAt}`);
 
         // Supabase upsert (non-fatal)
         if (supabase) {
@@ -858,13 +877,56 @@ app.post('/webhook', express.raw({type:'application/json'}), async (req,res)=>{
         }
 
         // Welcome email (non-fatal)
+        const isTrialing = stripeStatus === 'trialing';
         resend.emails.send({
           from: 'ThumbFrame <onboarding@resend.dev>',
           to: customerEmail,
-          subject: 'Welcome to ThumbFrame Pro!',
-          html: '<h1>Welcome to Pro!</h1><p>Your Pro features are now unlocked. Open the editor to get started.</p>',
+          subject: isTrialing ? 'Your 7-day ThumbFrame Pro trial has started!' : 'Welcome to ThumbFrame Pro!',
+          html: isTrialing
+            ? '<h1>Your Pro trial is live!</h1><p>You have 7 days of full Pro access. Make something great.</p><p>No charge until your trial ends — and you can cancel anytime.</p>'
+            : '<h1>Welcome to Pro!</h1><p>Your Pro features are now unlocked. Open the editor to get started.</p>',
         }).catch(()=>{});
 
+        break;
+      }
+      case 'customer.subscription.trial_will_end': {
+        // Fires ~3 days before trial ends
+        const sub = event.data.object;
+        const cid = sub.customer;
+        const usersT = loadUsers();
+        const entryT = Object.values(usersT).find(u => u.stripeCustomerId === cid);
+        if (entryT) {
+          entryT.trialEndsAt = new Date(sub.trial_end * 1000).toISOString();
+          saveUsers(usersT);
+          console.log(`[webhook] trial_will_end — customer: ${cid}, ends: ${entryT.trialEndsAt}`);
+          // TODO: send "trial ending soon" reminder email via resend
+        }
+        break;
+      }
+      case 'customer.subscription.updated': {
+        const sub = event.data.object;
+        const cid = sub.customer;
+        const usersU = loadUsers();
+        const entryU = Object.values(usersU).find(u => u.stripeCustomerId === cid);
+        if (entryU) {
+          if (sub.status === 'active') {
+            // Trial converted to paid, or renewal
+            entryU.plan        = 'pro';
+            entryU.stripeStatus = 'active';
+            entryU.trialEndsAt  = null;
+          } else if (sub.status === 'trialing') {
+            entryU.stripeStatus = 'trialing';
+            entryU.trialEndsAt  = new Date(sub.trial_end * 1000).toISOString();
+          } else if (sub.status === 'canceled' || sub.status === 'unpaid' || sub.status === 'incomplete_expired') {
+            entryU.plan        = 'free';
+            entryU.stripeStatus = sub.status;
+            entryU.trialEndsAt  = null;
+          } else {
+            entryU.stripeStatus = sub.status;
+          }
+          saveUsers(usersU);
+          console.log(`[webhook] subscription.updated — customer: ${cid}, status: ${sub.status}`);
+        }
         break;
       }
       case 'customer.subscription.deleted': {
