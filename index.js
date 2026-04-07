@@ -1458,6 +1458,245 @@ Be honest, specific, and reference exactly what you observe in this image. Outpu
   }
 });
 
+// ── Automation Pipeline Orchestrator ─────────────────────────────────────────
+app.post('/api/analyze-thumbnail', flexAuthMiddleware, async(req,res)=>{
+  try{
+    const{image,niche,videoTitle}=req.body;
+    if(!image||!image.startsWith('data:image/')){
+      return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
+    }
+
+    // Gate: Pro+ only
+    const users=loadUsers();
+    const userRecord=users[req.user.email];
+    const plan=userRecord?.plan||'free';
+    if(plan==='free'||plan==='starter'){
+      return res.status(403).json({
+        success:false,
+        error:'Auto-analyze requires a Pro plan. Upgrade to unlock the full automation pipeline.',
+        code:'PLAN_REQUIRED',
+        requiredPlan:'pro',
+      });
+    }
+
+    const quota=checkAndDecrementQuota(req.user.email);
+    if(!quota.ok) return res.status(429).json({success:false,error:quota.message,code:quota.code});
+
+    const[,imgBase64]=image.split(',');
+    const imgBuf=Buffer.from(imgBase64,'base64');
+    const media_type=image.startsWith('data:image/png')?'image/png':'image/jpeg';
+    const effectiveNiche=niche||userRecord?.niche||'general';
+
+    // ── Run analysis in parallel ──────────────────────────────────────────────
+    const[colorResult,compositionResult,ctrResult]=await Promise.all([
+      // 1. Sharp color analysis — local, instant
+      (async()=>{
+        try{
+          const stats=await sharp(imgBuf).stats();
+          const channels=stats.channels;
+          const r=channels[0],g=channels[1],b=channels[2];
+          const avgBrightness=Math.round((r.mean+g.mean+b.mean)/3);
+          const stdDev=Math.round((r.stdev+g.stdev+b.stdev)/3);
+          // Estimate saturation from max-min channel spread per pixel (approximate)
+          const maxC=Math.max(r.mean,g.mean,b.mean);
+          const minC=Math.min(r.mean,g.mean,b.mean);
+          const saturation=maxC>0?Math.round(((maxC-minC)/maxC)*100):0;
+          return{ok:true,brightness:avgBrightness,contrast:stdDev,saturation,r:Math.round(r.mean),g:Math.round(g.mean),b:Math.round(b.mean)};
+        }catch(e){
+          console.warn('[ANALYZE] Sharp color failed:',e.message);
+          return{ok:false};
+        }
+      })(),
+
+      // 2. Composition analysis — Claude Vision
+      (async()=>{
+        try{
+          const compPrompt=`Analyze this YouTube thumbnail's composition. Return ONLY valid JSON:
+{
+  "score": <integer 0-100>,
+  "focal_point": "<where the main subject is, e.g. 'center-left'>",
+  "text_zones": ["<region with text>"],
+  "issues": ["<specific issue 1>","<specific issue 2>"],
+  "face_count": <integer, number of faces visible>,
+  "face_size": "<small|medium|large|none>",
+  "background_busyness": "<clean|moderate|busy>"
+}`;
+          const resp=await anthropic.messages.create({
+            model:'claude-haiku-4-5-20251001',
+            max_tokens:400,
+            messages:[{role:'user',content:[
+              {type:'image',source:{type:'base64',media_type,data:imgBase64}},
+              {type:'text',text:compPrompt},
+            ]}],
+          });
+          const raw=resp.content[0]?.text?.trim()||'';
+          const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
+          return{ok:true,...JSON.parse(raw.slice(s,e+1))};
+        }catch(e){
+          console.warn('[ANALYZE] Composition failed:',e.message);
+          return{ok:false};
+        }
+      })(),
+
+      // 3. CTR quick score — Claude Vision
+      (async()=>{
+        try{
+          const ctrPrompt=`Score this YouTube thumbnail's CTR potential${videoTitle?` for "${videoTitle}"`:''}${effectiveNiche&&effectiveNiche!=='general'?` in the ${effectiveNiche} niche`:''}.
+Return ONLY valid JSON:
+{
+  "overall": <integer 0-100>,
+  "text_readability": <integer 0-100>,
+  "emotional_impact": <integer 0-100>,
+  "color_pop": <integer 0-100>,
+  "top_issue": "<the single most impactful thing to fix>"
+}`;
+          const resp=await anthropic.messages.create({
+            model:'claude-haiku-4-5-20251001',
+            max_tokens:200,
+            messages:[{role:'user',content:[
+              {type:'image',source:{type:'base64',media_type,data:imgBase64}},
+              {type:'text',text:ctrPrompt},
+            ]}],
+          });
+          const raw=resp.content[0]?.text?.trim()||'';
+          const s=raw.indexOf('{'),e=raw.lastIndexOf('}');
+          return{ok:true,...JSON.parse(raw.slice(s,e+1))};
+        }catch(e){
+          console.warn('[ANALYZE] CTR quick score failed:',e.message);
+          return{ok:false};
+        }
+      })(),
+    ]);
+
+    // ── Build recommendations from combined results ────────────────────────────
+    const recs=[];
+
+    // Face / expression
+    if(compositionResult.ok){
+      if(compositionResult.face_count===0){
+        recs.push({
+          id:'add-face',
+          priority:1,
+          icon:'😮',
+          title:'Add a Human Face',
+          description:'Thumbnails with expressive human faces get 38% higher CTR on average. Consider adding your face or a reaction shot.',
+          action:'segment',
+          actionLabel:'Add Subject',
+        });
+      } else if(compositionResult.face_size==='small'){
+        recs.push({
+          id:'enlarge-face',
+          priority:1,
+          icon:'🔍',
+          title:'Make the Face Bigger',
+          description:'Your face is too small — viewers can\'t read the emotion at thumbnail size. Crop closer or scale up.',
+          action:'resize-subject',
+          actionLabel:'Resize Subject',
+        });
+      }
+    }
+
+    // Text readability
+    if(ctrResult.ok&&ctrResult.text_readability<60){
+      recs.push({
+        id:'text-contrast',
+        priority:2,
+        icon:'✏️',
+        title:'Boost Text Contrast',
+        description:`Text readability scored ${ctrResult.text_readability}/100. Add a dark outline, shadow, or semi-transparent backing to make words pop.`,
+        action:'improve-text',
+        actionLabel:'Fix Text',
+      });
+    }
+
+    // Color / brightness
+    if(colorResult.ok){
+      if(colorResult.brightness<60){
+        recs.push({
+          id:'brighten',
+          priority:2,
+          icon:'☀️',
+          title:'Brighten the Thumbnail',
+          description:`Average brightness is ${colorResult.brightness}/255 — too dark for mobile screens. Apply color grade to lift the overall exposure.`,
+          action:'color-grade',
+          actionParams:{preset:'default',intensity:70},
+          actionLabel:'Auto Color Grade',
+        });
+      } else if(colorResult.saturation<25){
+        recs.push({
+          id:'saturate',
+          priority:3,
+          icon:'🎨',
+          title:'Add Vibrant Color',
+          description:'Colors look muted. Saturated thumbnails stand out in the feed. Apply the Neon or Warm color grade preset.',
+          action:'color-grade',
+          actionParams:{preset:'neon',intensity:60},
+          actionLabel:'Apply Color Grade',
+        });
+      }
+    }
+
+    // Background busyness
+    if(compositionResult.ok&&compositionResult.background_busyness==='busy'){
+      recs.push({
+        id:'clean-bg',
+        priority:3,
+        icon:'🧹',
+        title:'Simplify the Background',
+        description:'The background is cluttered and competing with your subject. Use Smart Cutout to separate subject and replace with a solid or gradient background.',
+        action:'remove-bg',
+        actionLabel:'Remove Background',
+      });
+    }
+
+    // Top CTR issue from the model
+    if(ctrResult.ok&&ctrResult.top_issue&&recs.length<4){
+      recs.push({
+        id:'ctr-top-issue',
+        priority:recs.length+1,
+        icon:'⚡',
+        title:'Improve CTR Score',
+        description:ctrResult.top_issue,
+        action:'ctr-check',
+        actionLabel:'Re-Score',
+      });
+    }
+
+    // Always add expression enhancement if face present
+    if(compositionResult.ok&&compositionResult.face_count>0&&recs.length<5){
+      recs.push({
+        id:'enhance-expression',
+        priority:recs.length+1,
+        icon:'😄',
+        title:'Amplify the Expression',
+        description:'Use AI expression enhancement to make the emotion more dramatic — open mouth, raised eyebrows, wider eyes.',
+        action:'enhance-expression',
+        actionLabel:'Enhance Expression',
+      });
+    }
+
+    // Sort by priority, keep top 5
+    recs.sort((a,b)=>a.priority-b.priority);
+    const top5=recs.slice(0,5);
+
+    console.log(`[ANALYZE] ${req.user.email} — ${top5.length} recs, CTR=${ctrResult.ok?ctrResult.overall:'?'}, brightness=${colorResult.ok?colorResult.brightness:'?'}`);
+
+    res.json({
+      success:true,
+      recommendations:top5,
+      metrics:{
+        color:colorResult.ok?{brightness:colorResult.brightness,saturation:colorResult.saturation,contrast:colorResult.contrast}:null,
+        composition:compositionResult.ok?{score:compositionResult.score,face_count:compositionResult.face_count,face_size:compositionResult.face_size,background_busyness:compositionResult.background_busyness}:null,
+        ctr:ctrResult.ok?{overall:ctrResult.overall,text_readability:ctrResult.text_readability,emotional_impact:ctrResult.emotional_impact,color_pop:ctrResult.color_pop}:null,
+      },
+      remaining:quota.remaining,
+    });
+  }catch(err){
+    console.error('[ANALYZE] Error:',err.message);
+    res.status(500).json({success:false,error:`Analysis failed: ${err.message}`,code:'API_FAILURE'});
+  }
+});
+
 // ── Auto Color Grade & Pop — Sharp pipelines ──────────────────────────────────
 const COLOR_GRADE_PRESETS = {
   default: {
