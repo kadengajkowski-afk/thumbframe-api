@@ -4,7 +4,8 @@
   "description": "ThumbFrame API",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "build": "echo 'no build step'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
