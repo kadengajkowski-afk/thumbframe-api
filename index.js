@@ -3455,4 +3455,28 @@ try {
   console.error('[INIT] Failed to mount Phase 15 YouTube routes:', err.message);
 }
 
+// ── Phase 18: Advanced AI (face enhance, auto-thumbnail, text suggest) ────────
+try {
+  const makeAiEnhanceRoutes      = require('./routes/aiEnhance.js');
+  const makeAutoThumbnailRoutes  = require('./routes/autoThumbnail.js');
+  const makeAiTextRoutes         = require('./routes/aiText.js');
+  app.use('/api/ai', makeAiEnhanceRoutes(supabase, flexAuthMiddleware));
+  app.use('/api/ai', makeAutoThumbnailRoutes(supabase, flexAuthMiddleware));
+  app.use('/api/ai', makeAiTextRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Phase 18 routes mounted: /api/ai/enhance-face, /api/ai/auto-thumbnail, /api/ai/suggest-text');
+} catch (err) {
+  console.error('[INIT] Failed to mount Phase 18 AI routes:', err.message);
+}
+
+// ── Phase 19: Growth + Monetization ───────────────────────────────────────────
+try {
+  const makeReferralRoutes  = require('./routes/referrals.js');
+  const makeShowcaseRoutes  = require('./routes/showcase.js');
+  app.use('/api/referrals', makeReferralRoutes(supabase, flexAuthMiddleware));
+  app.use('/api/showcase',  makeShowcaseRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Phase 19 routes mounted: /api/referrals, /api/showcase');
+} catch (err) {
+  console.error('[INIT] Failed to mount Phase 19 Growth routes:', err.message);
+}
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
