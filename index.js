@@ -3248,4 +3248,189 @@ app.post('/api/newsletter/subscribe', async(req,res)=>{
 
 app.get('/api/ping', (req, res) => res.json({ pong: true, time: Date.now() }));
 
+// ── ThumbFriend chat ───────────────────────────────────────────────────────────
+// POST /api/thumbfriend/chat
+// Body: { message, image (base64 JPEG, no data: prefix), canvasData, conversationHistory, personality }
+// Returns: { message, actions, expression, remaining }
+
+const THUMBFRIEND_SYSTEM_PROMPTS = {
+  hype_coach: `You are ThumbFriend, a HIGH-ENERGY creative partner inside ThumbFrame — a YouTube thumbnail editor.
+You are NOT Claude. You are ThumbFriend. NEVER break character.
+
+PERSONALITY: Energetic, use CAPS for emphasis, push bold choices, celebrate wins, use exclamation points. Hype the creator up!
+
+You can SEE the user's canvas. Give SPECIFIC, ACTIONABLE feedback.`,
+
+  brutally_honest: `You are ThumbFriend, a brutally honest creative partner inside ThumbFrame — a YouTube thumbnail editor.
+You are NOT Claude. You are ThumbFriend. Never break character.
+
+PERSONALITY: Direct. No sugarcoating. Short sentences. Get to the point fast. Say what others won't.
+
+You can see the user's canvas. Give specific, actionable feedback.`,
+
+  chill_creative_director: `You are ThumbFriend, a calm creative partner inside ThumbFrame — a YouTube thumbnail editor.
+You are NOT Claude. You are ThumbFriend. Never break character.
+
+PERSONALITY: Calm, thoughtful. Use "we/let's". Give options not commands. Collaborative tone.
+
+You can see the user's canvas. Give specific, actionable feedback.`,
+
+  data_nerd: `You are ThumbFriend, a data-driven creative partner inside ThumbFrame — a YouTube thumbnail editor.
+You are NOT Claude. You are ThumbFriend. Never break character.
+
+PERSONALITY: Lead with numbers. Cite CTR research. Talk percentages. Be analytical.
+
+You can see the user's canvas. Give specific, actionable feedback.`,
+
+  the_legend: `You are ThumbFriend, a veteran creator mentor inside ThumbFrame — a YouTube thumbnail editor.
+You are NOT Claude. You are ThumbFriend. Never break character.
+
+PERSONALITY: Veteran creator vibe. Storytelling approach. Mentoring tone. "In my experience..."
+
+You can see the user's canvas. Give specific, actionable feedback.`,
+};
+
+const THUMBFRIEND_SHARED_RULES = `
+RULES:
+1. Be specific — reference actual layer names, colors, positions you can see in the image
+2. Max 3 suggestions at a time — don't overwhelm
+3. If suggesting canvas changes, include them as JSON actions in your response
+4. Keep responses conversational and concise — this is a chat, not an essay
+5. Never suggest changing the video content itself — only what's editable in the editor
+6. Use relative benchmarks ONLY — never promise exact CTR percentage increases
+7. Never auto-apply anything — always let the user decide
+
+CTR KNOWLEDGE:
+- Optimal brightness: 100–110 on 0–255 scale
+- Best color for CTR: cyan (+36% relative to average)
+- Text: 0–2 words ideal (more text = lower CTR on average)
+- Faces help on channels over 200K subs
+- High contrast outperforms low contrast by ~15% on average
+- Timestamp zone (bottom-right 100×24px) must stay clear
+
+Respond with ONLY valid JSON in this exact format — no markdown, no code fences:
+{
+  "message": "your conversational response",
+  "actions": [],
+  "expression": "neutral",
+  "memory_updates": []
+}
+
+Valid expression values: neutral, thinking, excited, concerned, working, proud
+
+Action format (include in actions array when suggesting canvas changes):
+{
+  "type": "adjust_brightness|adjust_contrast|adjust_saturation|apply_color_grade|move_layer|resize_layer",
+  "target": "layer id or name",
+  "target_name": "human readable name",
+  "params": {},
+  "reason": "one sentence why this helps"
+}`;
+
+app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
+  try {
+    const { message, image, canvasData, conversationHistory = [], personality = 'chill_creative_director' } = req.body;
+
+    if (!message) return res.status(400).json({ error: 'message is required' });
+
+    // Check pro status (from Supabase user_metadata or profiles table)
+    let isPro = false;
+    if (supabase && req.user?.id) {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_pro')
+          .eq('id', req.user.id)
+          .single();
+        isPro = !!data?.is_pro;
+      } catch { /* non-fatal — fall back to not-pro */ }
+    }
+
+    if (!isPro) {
+      return res.status(403).json({ error: 'ThumbFriend requires a Pro subscription.' });
+    }
+
+    // Build system prompt
+    const basePersonality = THUMBFRIEND_SYSTEM_PROMPTS[personality] || THUMBFRIEND_SYSTEM_PROMPTS.chill_creative_director;
+    const systemPrompt = basePersonality + THUMBFRIEND_SHARED_RULES;
+
+    // Build message history for Claude
+    const isFirstTurn = conversationHistory.length === 0;
+    const messages = [];
+
+    // Add conversation history (text-only turns, no images)
+    for (const h of conversationHistory) {
+      messages.push({ role: h.role, content: h.content });
+    }
+
+    // Build current user message: image (if first turn) + text
+    if (isFirstTurn && image) {
+      // Image BEFORE text — Anthropic requirement
+      messages.push({
+        role: 'user',
+        content: [
+          {
+            type:   'image',
+            source: { type: 'base64', media_type: 'image/jpeg', data: image },
+          },
+          {
+            type: 'text',
+            text: `Canvas info: layers=${canvasData?.layerCount || 0}, hasText=${canvasData?.hasText}, brightness=${canvasData?.brightness}, textContent="${canvasData?.textContent || ''}".\n\n${message}`,
+          },
+        ],
+      });
+    } else {
+      // Turns 2+: text description only (75% cost saving — no image)
+      const ctx = canvasData
+        ? ` [Canvas: ${canvasData.layerCount} layers, brightness ${canvasData.brightness}, text: "${canvasData.textContent || 'none'}"]`
+        : '';
+      messages.push({ role: 'user', content: message + ctx });
+    }
+
+    // Select model: Sonnet for Turn 1 (vision), Haiku for subsequent turns
+    const model = isFirstTurn
+      ? 'claude-sonnet-4-20250514'
+      : 'claude-haiku-4-5-20250514';
+
+    const claudeRes = await anthropic.messages.create({
+      model,
+      max_tokens: 600,
+      system:     systemPrompt,
+      messages,
+    });
+
+    const raw = claudeRes.content?.[0]?.text || '';
+
+    // Parse JSON response from Claude
+    let parsed = null;
+    try {
+      // Strip markdown fences if Claude added them despite instructions
+      const clean = raw.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'').trim();
+      parsed = JSON.parse(clean);
+    } catch {
+      // Fallback: extract JSON object with regex
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch { /* ignore */ }
+      }
+    }
+
+    if (!parsed) {
+      // Claude didn't return valid JSON — wrap the raw text
+      parsed = { message: raw.slice(0, 500), actions: [], expression: 'neutral' };
+    }
+
+    res.json({
+      message:    parsed.message    || 'I had trouble formulating a response. Try again?',
+      actions:    Array.isArray(parsed.actions) ? parsed.actions.slice(0, 3) : [],
+      expression: parsed.expression || 'neutral',
+      remaining:  null, // Pro = unlimited
+    });
+
+  } catch (err) {
+    console.error('[THUMBFRIEND] Error:', err.message);
+    res.status(500).json({ error: 'ThumbFriend is having trouble right now. Try again in a moment.' });
+  }
+});
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
