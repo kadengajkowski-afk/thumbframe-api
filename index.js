@@ -3433,4 +3433,17 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
   }
 });
 
+// ── Phase 12-14: AI Generate, Background Remover, Asset Library ───────────────
+try {
+  const makeAiGenerateRoutes = require('./routes/aiGenerate.js');
+  const makeRemoveBgRoutes   = require('./routes/removeBg.js');
+  const makeAssetRoutes      = require('./routes/assets.js');
+  app.use('/api/ai',        makeAiGenerateRoutes(supabase, flexAuthMiddleware));
+  app.use('/api/remove-bg', makeRemoveBgRoutes(supabase, flexAuthMiddleware));
+  app.use('/api/assets',    makeAssetRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Phase 12-14 routes mounted: /api/ai, /api/remove-bg, /api/assets');
+} catch (err) {
+  console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
+}
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
