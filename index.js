@@ -3446,4 +3446,13 @@ try {
   console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
 }
 
+// ── Phase 15: YouTube Integration ─────────────────────────────────────────────
+try {
+  const makeYouTubeRoutes = require('./routes/youtube.js');
+  app.use('/api/youtube', makeYouTubeRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Phase 15 routes mounted: /api/youtube');
+} catch (err) {
+  console.error('[INIT] Failed to mount Phase 15 YouTube routes:', err.message);
+}
+
 app.listen(PORT,'0.0.0.0',()=>console.log(`🚀 ThumbFrame API running on port ${PORT}`));
