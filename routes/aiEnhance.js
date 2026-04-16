@@ -21,8 +21,8 @@ module.exports = function(supabase, flexAuth) {
     if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
 
     // Pro check
-    const isPro = req.user?.user_metadata?.is_pro === true || req.user?.is_pro === true;
-    if (!isPro) return res.status(403).json({ error: 'Pro required' });
+    const isPro = req.user?.is_pro === true || req.user?.plan === 'pro';
+    if (!isPro) return res.status(403).json({ error: 'pro_required', message: 'This feature requires a Pro plan.' });
 
     try {
       // Use Replicate's gfpgan model

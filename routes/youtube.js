@@ -19,7 +19,7 @@ function getOAuth2Client() {
 
 // ── Pro check helper ───────────────────────────────────────────────────────────
 function isPro(user) {
-  return user?.user_metadata?.is_pro === true || user?.is_pro === true;
+  return user?.is_pro === true || user?.plan === 'pro';
 }
 
 // ── Factory ────────────────────────────────────────────────────────────────────

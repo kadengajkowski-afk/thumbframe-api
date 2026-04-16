@@ -1591,11 +1591,9 @@ app.post('/api/analyze-thumbnail', flexAuthMiddleware, async(req,res)=>{
       return res.status(400).json({success:false,error:'Missing or invalid image',code:'INVALID_INPUT'});
     }
 
-    // Gate: Pro+ only
-    const users=loadUsers();
-    const userRecord=users[req.user.email];
-    const plan=userRecord?.plan||'free';
-    if(plan==='free'||plan==='starter'){
+    // Gate: Pro+ only — is_pro and plan populated by flexAuthMiddleware
+    const isProUser = req.user?.is_pro === true || req.user?.plan === 'pro';
+    if(!isProUser){
       return res.status(403).json({
         success:false,
         error:'Auto-analyze requires a Pro plan. Upgrade to unlock the full automation pipeline.',
@@ -2344,43 +2342,19 @@ app.post('/api/generate-variants', flexAuthMiddleware, async(req,res)=>{
 
 // ── Prompt-to-Thumbnail Engine ────────────────────────────────────────────────
 
-// Helper: check Pro plan — checks users.json → JWT user_metadata → Supabase profiles (source of truth)
-async function requirePro(req, res) {
-  const email = req.user?.email;
-
-  // 1. JWT user_metadata (fastest — already decoded by flexAuthMiddleware)
-  if (req.user?.user_metadata?.is_pro === true) return false;
-
-  // 2. In-memory store (fast, but ephemeral — wiped on Railway redeploy)
-  const users = loadUsers();
-  const localPlan = users[email]?.plan?.toLowerCase();
-  if (localPlan === 'pro' || localPlan === 'agency') return false;
-
-  // 3. Supabase profiles (authoritative source of truth — persists across restarts)
-  if (supabase && email) {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('is_pro, plan')
-        .eq('email', email)
-        .maybeSingle();
-      if (data?.is_pro === true || data?.plan === 'pro' || data?.plan === 'agency') {
-        // Cache in local store so next check is faster
-        if (!users[email]) users[email] = { email };
-        users[email].plan = 'pro';
-        saveUsers(users);
-        return false;
-      }
-    } catch(e) { /* non-fatal — fall through to deny */ }
+// Helper: check Pro plan — is_pro and plan are set by flexAuthMiddleware from profiles table
+function requirePro(req, res) {
+  const isPro = req.user?.is_pro === true || req.user?.plan === 'pro';
+  if (!isPro) {
+    res.status(403).json({
+      success: false,
+      error: 'This feature requires a Pro plan.',
+      code: 'PLAN_REQUIRED',
+      requiredPlan: 'pro',
+    });
+    return true; // blocked
   }
-
-  res.status(403).json({
-    success: false,
-    error: 'This feature requires a Pro plan.',
-    code: 'PLAN_REQUIRED',
-    requiredPlan: 'pro',
-  });
-  return true; // blocked
+  return false;
 }
 
 // Helper: apply anti-slop Sharp steps to a buffer, return processed buffer
@@ -2458,7 +2432,7 @@ function buildNicheCalibration(niche) {
 // Claude decomposes a prompt into compositable components
 app.post('/api/thumbnail/prompt-plan', flexAuthMiddleware, async (req, res) => {
   try {
-    if (await requirePro(req, res)) return;
+    if (requirePro(req, res)) return;
 
     const { prompt, niche, hasSubjectPhoto = false } = req.body;
     if (!prompt?.trim()) return res.status(400).json({ success: false, error: 'prompt required', code: 'INVALID_INPUT' });
@@ -2535,7 +2509,7 @@ For text_layer, include "content" (the text string) and "style" ({ "font": "Impa
 // Generate a single component (background, prop, text, etc.)
 app.post('/api/thumbnail/generate-component', flexAuthMiddleware, async (req, res) => {
   try {
-    if (await requirePro(req, res)) return;
+    if (requirePro(req, res)) return;
 
     const { type, generationPrompt, content, style } = req.body;
     if (!type) return res.status(400).json({ success: false, error: 'type required', code: 'INVALID_INPUT' });
@@ -2633,7 +2607,7 @@ app.post('/api/thumbnail/generate-component', flexAuthMiddleware, async (req, re
 // Sharp pixel-level post-processing pipeline
 app.post('/api/thumbnail/anti-slop-process', flexAuthMiddleware, async (req, res) => {
   try {
-    if (await requirePro(req, res)) return;
+    if (requirePro(req, res)) return;
 
     const { imageBase64, steps = ['all'] } = req.body;
     if (!imageBase64) return res.status(400).json({ success: false, error: 'imageBase64 required', code: 'INVALID_INPUT' });
@@ -3356,21 +3330,10 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
 
     if (!message) return res.status(400).json({ error: 'message is required' });
 
-    // Check pro status (from Supabase user_metadata or profiles table)
-    let isPro = false;
-    if (supabase && req.user?.id) {
-      try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_pro')
-          .eq('id', req.user.id)
-          .single();
-        isPro = !!data?.is_pro;
-      } catch { /* non-fatal — fall back to not-pro */ }
-    }
-
+    // Pro check — is_pro and plan are populated by flexAuthMiddleware from profiles table
+    const isPro = req.user?.is_pro === true || req.user?.plan === 'pro';
     if (!isPro) {
-      return res.status(403).json({ error: 'ThumbFriend requires a Pro subscription.' });
+      return res.status(403).json({ error: 'pro_required', message: 'ThumbFriend requires a Pro subscription.' });
     }
 
     // Build system prompt
