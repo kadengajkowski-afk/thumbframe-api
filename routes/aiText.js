@@ -29,7 +29,7 @@ module.exports = function(supabase, flexAuth) {
       const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
       const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 600,
         messages: [{
           role: 'user',

@@ -475,7 +475,7 @@ Rules:
 - x/y positions are percentages of canvas width/height (0–100)`;
 
     const message = await anthropic.messages.create({
-      model:      'claude-opus-4-20250514',
+      model:      'claude-opus-4-5-20251001',
       max_tokens: 800,
       system,
       messages:[{ role:'user', content:command }],
@@ -1368,7 +1368,7 @@ Output only the JSON array.`;
 
     console.log(`[AITEXT] Generating headlines for ${req.user.email}${title?` — "${title}"`:''}${niche?` [${niche}]`:''}`);
     const response=await anthropic.messages.create({
-      model:'claude-opus-4-20250514',
+      model:'claude-opus-4-5-20251001',
       max_tokens:800,
       messages:[{
         role:'user',
@@ -1432,7 +1432,7 @@ app.post('/api/analyze-composition', flexAuthMiddleware, async(req,res)=>{
 
     console.log(`[COMP] Analyzing composition for ${req.user.email}${title?` — "${title}"`:''}`)
     const response=await anthropic.messages.create({
-      model:'claude-opus-4-20250514',
+      model:'claude-opus-4-5-20251001',
       max_tokens:900,
       messages:[{
         role:'user',
@@ -1524,7 +1524,7 @@ Be honest, specific, and reference exactly what you observe in this image. Outpu
 
     console.log(`[CTRV2] Scoring for ${req.user.email}${title?` — "${title}"`:''}${niche?` [${niche}]`:''}`);
     const response=await anthropic.messages.create({
-      model:'claude-opus-4-20250514',
+      model:'claude-opus-4-5-20251001',
       max_tokens:900,
       messages:[{role:'user',content:[
         {type:'image',source:{type:'base64',media_type,data:imgBase64}},
@@ -2258,7 +2258,7 @@ app.post('/api/generate-variants', flexAuthMiddleware, async(req,res)=>{
       try{
         const nicheHint=nicheCtxVar?` Channel type: ${effectiveNicheVar}. ${nicheCtxVar}`:'';
         const aiRes=await anthropic.messages.create({
-          model:'claude-opus-4-5',max_tokens:60,
+          model:'claude-haiku-4-5-20251001',max_tokens:60,
           messages:[{role:'user',content:`Write 1 punchy YouTube thumbnail headline in ALL CAPS, max 5 words, no punctuation except !, for the video: "${title}".${nicheHint} Output the headline only, nothing else.`}],
         });
         const raw=aiRes.content[0]?.text?.trim().toUpperCase().replace(/['"]/g,'').slice(0,36);
@@ -3375,8 +3375,8 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
 
     // Select model: Sonnet for Turn 1 (vision), Haiku for subsequent turns
     const model = isFirstTurn
-      ? 'claude-sonnet-4-20250514'
-      : 'claude-haiku-4-5-20250514';
+      ? 'claude-sonnet-4-5-20251001'
+      : 'claude-haiku-4-5-20251001';
 
     const claudeRes = await anthropic.messages.create({
       model,
