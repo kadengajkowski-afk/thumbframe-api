@@ -169,7 +169,12 @@ module.exports = function (supabase, flexAuth) {
 
       // Pro gate
       const isPro =
-        req.user?.user_metadata?.is_pro === true || req.user?.is_pro === true;
+        req.user?.user_metadata?.is_pro === true ||
+        req.user?.is_pro === true ||
+        req.user?.plan === 'pro' ||
+        req.user?.plan === 'Pro' ||
+        req.user?.plan === 'agency';
+      console.log('[aiGenerate /generate] user:', req.user?.id, 'is_pro:', req.user?.is_pro, 'plan:', req.user?.plan, 'isPro:', isPro);
       if (!isPro) {
         return res.status(403).json({
           error: 'pro_required',
@@ -214,7 +219,12 @@ module.exports = function (supabase, flexAuth) {
       }
 
       const isPro =
-        req.user?.user_metadata?.is_pro === true || req.user?.is_pro === true;
+        req.user?.user_metadata?.is_pro === true ||
+        req.user?.is_pro === true ||
+        req.user?.plan === 'pro' ||
+        req.user?.plan === 'Pro' ||
+        req.user?.plan === 'agency';
+      console.log('[aiGenerate /generate-variations] user:', req.user?.id, 'is_pro:', req.user?.is_pro, 'plan:', req.user?.plan, 'isPro:', isPro);
       if (!isPro) {
         return res.status(403).json({
           error: 'pro_required',

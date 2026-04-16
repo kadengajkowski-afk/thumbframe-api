@@ -139,7 +139,17 @@ async function flexAuthMiddleware(req,res,next){
     try{
       const {data:{user},error}=await supabase.auth.getUser(token);
       if(!error && user){
-        req.user={email:user.email, id:user.id};
+        // Fetch profile to get is_pro / plan — JWT alone doesn't carry these
+        let is_pro=false, plan='free', is_dev=false;
+        try{
+          const {data:profile}=await supabase.from('profiles').select('is_pro,plan,is_dev').eq('id',user.id).maybeSingle();
+          if(profile){
+            is_pro=profile.is_pro===true;
+            plan=profile.plan||'free';
+            is_dev=profile.is_dev===true;
+          }
+        }catch{}
+        req.user={email:user.email, id:user.id, is_pro, plan, is_dev};
         return next();
       }
     }catch{}
