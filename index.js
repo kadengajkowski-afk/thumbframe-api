@@ -142,7 +142,8 @@ async function flexAuthMiddleware(req,res,next){
         // Fetch profile to get is_pro / plan — JWT alone doesn't carry these
         let is_pro=false, plan='free', is_dev=false;
         try{
-          const {data:profile}=await supabase.from('profiles').select('is_pro,plan,is_dev').eq('id',user.id).maybeSingle();
+          // profiles.id is bigint (not UUID) — must query by email
+          const {data:profile}=await supabase.from('profiles').select('is_pro,plan,is_dev').eq('email',user.email).maybeSingle();
           if(profile){
             is_pro=profile.is_pro===true;
             plan=profile.plan||'free';
@@ -170,6 +171,18 @@ async function flexAuthMiddleware(req,res,next){
 
 // ── Health ─────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.json({status:'ThumbFrame API running',version:'3.0'}));
+
+// ── Debug: what does the auth middleware see for this token? ──────────────────
+app.get('/api/debug/me', flexAuthMiddleware, (req,res)=>{
+  res.json({
+    userId:  req.user?.id,
+    email:   req.user?.email,
+    is_pro:  req.user?.is_pro,
+    plan:    req.user?.plan,
+    is_dev:  req.user?.is_dev,
+    rawUser: req.user,
+  });
+});
 
 // ── Proxy image (CORS fix) ─────────────────────────────────────────────────────
 app.get('/proxy-image', async(req,res)=>{
