@@ -43,6 +43,25 @@ module.exports = function (supabase, flexAuth) {
 
   console.log('[YOUTUBE] Routes registered and configured');
 
+  // ── GET /benchmark ─────────────────────────────────────────────────────────
+  // Returns niche-specific CTR benchmarks for the CTR score widget.
+  router.get('/benchmark', flexAuth, (req, res) => {
+    const { niche = 'default' } = req.query;
+    const benchmarks = {
+      default:   { avgCtr: 4.5, goodCtr: 6.0, greatCtr: 8.0  },
+      gaming:    { avgCtr: 5.2, goodCtr: 7.0, greatCtr: 10.0 },
+      minecraft: { avgCtr: 6.1, goodCtr: 8.5, greatCtr: 12.0 },
+      tech:      { avgCtr: 3.8, goodCtr: 5.5, greatCtr: 7.5  },
+      vlog:      { avgCtr: 3.2, goodCtr: 4.8, greatCtr: 6.5  },
+      cooking:   { avgCtr: 4.0, goodCtr: 5.8, greatCtr: 8.0  },
+      fitness:   { avgCtr: 4.2, goodCtr: 6.0, greatCtr: 8.5  },
+      finance:   { avgCtr: 3.5, goodCtr: 5.0, greatCtr: 7.0  },
+      education: { avgCtr: 3.9, goodCtr: 5.5, greatCtr: 7.5  },
+    };
+    const data = benchmarks[niche.toLowerCase()] || benchmarks.default;
+    res.json({ niche, ...data, source: 'internal' });
+  });
+
   // ── GET /auth-url ──────────────────────────────────────────────────────────
   // Returns the Google OAuth consent-screen URL for the current Pro user.
   router.get('/auth-url', flexAuth, async (req, res) => {

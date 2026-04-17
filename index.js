@@ -3326,6 +3326,10 @@ Action format (include in actions array when suggesting canvas changes):
 
 app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
   try {
+    console.log('[THUMBFRIEND] request received, user:', req.user?.id || req.user?.sub);
+    console.log('[THUMBFRIEND] ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY);
+    console.log('[THUMBFRIEND] image present:', !!req.body?.image, 'length:', req.body?.image?.length || 0);
+
     const { message, image, canvasData, conversationHistory = [], personality = 'chill_creative_director' } = req.body;
 
     if (!message) return res.status(400).json({ error: 'message is required' });
@@ -3351,20 +3355,40 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
 
     // Build current user message: image (if first turn) + text
     if (isFirstTurn && image) {
-      // Image BEFORE text — Anthropic requirement
-      messages.push({
-        role: 'user',
-        content: [
-          {
-            type:   'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: image },
-          },
-          {
-            type: 'text',
-            text: `Canvas info: layers=${canvasData?.layerCount || 0}, hasText=${canvasData?.hasText}, brightness=${canvasData?.brightness}, textContent="${canvasData?.textContent || ''}".\n\n${message}`,
-          },
-        ],
-      });
+      // Strip accidental data: prefix if frontend sent one
+      let imageData = image;
+      let mediaType = 'image/jpeg';
+      if (typeof image === 'string' && image.startsWith('data:image')) {
+        const match = image.match(/^data:image\/(png|jpeg|webp|gif);base64,(.+)$/);
+        if (match) {
+          mediaType = `image/${match[1]}`;
+          imageData = match[2];
+        }
+      }
+      // Validate base64 is non-empty and reasonably sized
+      if (imageData && imageData.length > 100) {
+        // Image BEFORE text — Anthropic requirement
+        messages.push({
+          role: 'user',
+          content: [
+            {
+              type:   'image',
+              source: { type: 'base64', media_type: mediaType, data: imageData },
+            },
+            {
+              type: 'text',
+              text: `Canvas info: layers=${canvasData?.layerCount || 0}, hasText=${canvasData?.hasText}, brightness=${canvasData?.brightness}, textContent="${canvasData?.textContent || ''}".\n\n${message}`,
+            },
+          ],
+        });
+      } else {
+        // Invalid image — send text-only with canvas context
+        console.warn('[THUMBFRIEND] Image too short or empty, sending text-only');
+        const ctx = canvasData
+          ? ` [Canvas: ${canvasData.layerCount} layers, brightness ${canvasData.brightness}, text: "${canvasData.textContent || 'none'}"]`
+          : '';
+        messages.push({ role: 'user', content: message + ctx });
+      }
     } else {
       // Turns 2+: text description only (75% cost saving — no image)
       const ctx = canvasData
@@ -3414,8 +3438,11 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
     });
 
   } catch (err) {
-    console.error('[THUMBFRIEND] Error:', err.message);
-    res.status(500).json({ error: 'ThumbFriend is having trouble right now. Try again in a moment.' });
+    console.error('[THUMBFRIEND] CRASH:', err.message, err.stack?.split('\n').slice(0, 4).join('\n'));
+    res.status(500).json({
+      error:   'ThumbFriend is having trouble right now. Try again in a moment.',
+      message: process.env.NODE_ENV !== 'production' ? err.message : undefined,
+    });
   }
 });
 
