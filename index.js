@@ -498,37 +498,43 @@ Rules:
   }
 });
 
-// ── Background remover ─────────────────────────────────────────────────────────
+// ── Background remover (legacy /remove-bg route — used by FaceCutoutFlow) ────
 app.post('/remove-bg', async(req,res)=>{
   try{
+    const apiKey = process.env.REMOVE_BG_API_KEY || process.env.REMOVEBG_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'REMOVE_BG_API_KEY not configured', fallback: 'mediapipe' });
+
     const {imageUrl, image}=req.body;
     const src=image||imageUrl;
     if(!src) return res.status(400).json({error:'No image'});
-    let imageBuffer;
+
+    // Extract raw base64 from data URL or fetch from URL
+    let base64Data;
     if(src.startsWith('data:')){
-      imageBuffer=Buffer.from(src.split(',')[1],'base64');
+      base64Data = src.split(',')[1];
     }else{
       const r=await fetch(src);
-      imageBuffer=Buffer.from(await r.arrayBuffer());
+      base64Data = Buffer.from(await r.arrayBuffer()).toString('base64');
     }
-    const formData=new FormData();
-    formData.append('image_file',imageBuffer,{filename:'image.png'});
-    formData.append('size','auto');
+
     const response=await fetch('https://api.remove.bg/v1.0/removebg',{
       method:'POST',
-      headers:{'X-Api-Key':process.env.REMOVEBG_API_KEY,...formData.getHeaders()},
-      body:formData,
+      headers:{
+        'X-Api-Key': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ image_file_b64: base64Data, size: 'full', format: 'png' }),
     });
     if(!response.ok){
       const errText=await response.text();
-      console.error('remove.bg error:',response.status,errText);
-      return res.status(400).json({error:'remove.bg failed'});
+      console.error('[remove-bg legacy] error:',response.status,errText);
+      return res.status(502).json({error:'remove.bg failed', fallback: 'mediapipe'});
     }
     const buffer=Buffer.from(await response.arrayBuffer());
     res.json({image:`data:image/png;base64,${buffer.toString('base64')}`});
   }catch(err){
-    console.error('Remove BG error:',err.message,err.type,err.code);
-    res.status(500).json({error:`AI tool timed out. ${err.message}`});
+    console.error('[remove-bg legacy] error:',err.message);
+    res.status(500).json({error:err.message, fallback: 'mediapipe'});
   }
 });
 

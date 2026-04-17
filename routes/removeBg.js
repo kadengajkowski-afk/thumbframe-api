@@ -19,7 +19,8 @@ module.exports = function (supabase, flexAuth) {
         });
       }
 
-      if (!process.env.REMOVE_BG_API_KEY) {
+      const apiKey = process.env.REMOVE_BG_API_KEY || process.env.REMOVEBG_API_KEY;
+      if (!apiKey) {
         return res.status(503).json({
           error: 'service_unavailable',
           message: 'remove.bg API key not configured.',
@@ -35,7 +36,7 @@ module.exports = function (supabase, flexAuth) {
       const response = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
         headers: {
-          'X-Api-Key': process.env.REMOVE_BG_API_KEY,
+          'X-Api-Key': apiKey,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
