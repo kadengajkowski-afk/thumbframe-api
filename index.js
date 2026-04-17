@@ -3399,7 +3399,7 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
 
     // Select model: Sonnet for Turn 1 (vision), Haiku for subsequent turns
     const model = isFirstTurn
-      ? 'claude-sonnet-4-5-20251001'
+      ? 'claude-sonnet-4-6'
       : 'claude-haiku-4-5-20251001';
 
     const claudeRes = await anthropic.messages.create({
