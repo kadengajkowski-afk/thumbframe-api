@@ -3383,7 +3383,7 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
             },
             {
               type: 'text',
-              text: `Canvas info: layers=${canvasData?.layerCount || 0}, hasText=${canvasData?.hasText}, brightness=${canvasData?.brightness}, textContent="${canvasData?.textContent || ''}".\n\n${message}`,
+              text: `Canvas info: ${canvasData?.layerCount || 0} layers, hasText=${canvasData?.hasText}, textContent="${canvasData?.textContent || ''}". Layer details: ${JSON.stringify(canvasData?.layers || [])}\n\nIMPORTANT: Base your visual analysis on the screenshot above, not on adjustment slider values (brightness 0 means no adjustment applied, not a dark image).\n\n${message}`,
             },
           ],
         });
@@ -3391,14 +3391,14 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
         // Invalid image — send text-only with canvas context
         console.warn('[THUMBFRIEND] Image too short or empty, sending text-only');
         const ctx = canvasData
-          ? ` [Canvas: ${canvasData.layerCount} layers, brightness ${canvasData.brightness}, text: "${canvasData.textContent || 'none'}"]`
+          ? ` [Canvas: ${canvasData.layerCount} layers, text: "${canvasData.textContent || 'none'}". Layers: ${JSON.stringify(canvasData?.layers || [])}]`
           : '';
         messages.push({ role: 'user', content: message + ctx });
       }
     } else {
       // Turns 2+: text description only (75% cost saving — no image)
       const ctx = canvasData
-        ? ` [Canvas: ${canvasData.layerCount} layers, brightness ${canvasData.brightness}, text: "${canvasData.textContent || 'none'}"]`
+        ? ` [Canvas: ${canvasData.layerCount} layers, text: "${canvasData.textContent || 'none'}". Layers: ${JSON.stringify(canvasData?.layers || [])}]`
         : '';
       messages.push({ role: 'user', content: message + ctx });
     }
