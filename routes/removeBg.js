@@ -40,7 +40,7 @@ module.exports = function (supabase, flexAuth) {
         },
         body: new URLSearchParams({
           image_file_b64: imageBase64,
-          size:           'auto',
+          size:           'full',
           format:         'png',
         }),
       });
