@@ -3383,7 +3383,7 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
             },
             {
               type: 'text',
-              text: `Canvas info: ${canvasData?.layerCount || 0} layers, hasText=${canvasData?.hasText}, textContent="${canvasData?.textContent || ''}". Layer details: ${JSON.stringify(canvasData?.layers || [])}\n\nIMPORTANT: Base your visual analysis on the screenshot above, not on adjustment slider values (brightness 0 means no adjustment applied, not a dark image).\n\n${message}`,
+              text: `Canvas: ${canvasData?.layerCount || 0} layers (${canvasData?.layerNames || 'none'}), ${canvasData?.imageCount || 0} images, ${canvasData?.textCount || 0} text layers, text: "${canvasData?.textContent || 'none'}". IMPORTANT: Judge visual content from the screenshot above — not metadata.\n\n${message}`,
             },
           ],
         });
@@ -3391,14 +3391,14 @@ app.post('/api/thumbfriend/chat', flexAuthMiddleware, async(req, res) => {
         // Invalid image — send text-only with canvas context
         console.warn('[THUMBFRIEND] Image too short or empty, sending text-only');
         const ctx = canvasData
-          ? ` [Canvas: ${canvasData.layerCount} layers, text: "${canvasData.textContent || 'none'}". Layers: ${JSON.stringify(canvasData?.layers || [])}]`
+          ? ` [Canvas: ${canvasData.layerCount} layers (${canvasData.layerNames || 'none'}), text: "${canvasData.textContent || 'none'}"]`
           : '';
         messages.push({ role: 'user', content: message + ctx });
       }
     } else {
       // Turns 2+: text description only (75% cost saving — no image)
       const ctx = canvasData
-        ? ` [Canvas: ${canvasData.layerCount} layers, text: "${canvasData.textContent || 'none'}". Layers: ${JSON.stringify(canvasData?.layers || [])}]`
+        ? ` [Canvas: ${canvasData.layerCount} layers (${canvasData.layerNames || 'none'}), text: "${canvasData.textContent || 'none'}"]`
         : '';
       messages.push({ role: 'user', content: message + ctx });
     }
