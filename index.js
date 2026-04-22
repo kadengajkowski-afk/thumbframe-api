@@ -852,7 +852,6 @@ app.post('/api/create-checkout-session', flexAuthMiddleware, async (req, res) =>
       mode: 'subscription',
       line_items: [{ price: process.env.STRIPE_PRO_PRICE_ID, quantity: 1 }],
       subscription_data: {
-        trial_period_days: 7,
         metadata: { userId: req.user.id },
       },
       customer_email: req.user.email,
@@ -3247,6 +3246,111 @@ app.post('/api/newsletter/subscribe', async(req,res)=>{
   }
 
   res.json({success:true,message:'Subscribed'});
+});
+
+// ── Support form submissions ──────────────────────────────────────────────────
+// POST /api/support-message
+// Body: { name, email, subject, message }
+// In-memory rate limit: one submission per client IP per 60 seconds.
+// Forwards the message to hello@thumbframe.com via Resend with the user's
+// email set as reply-to so a plain "Reply" in Gmail goes back to them.
+
+const supportRateLimit = new Map();           // ip -> lastSubmitMs
+const SUPPORT_RATE_WINDOW_MS = 60 * 1000;
+
+function getClientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (fwd) {
+    const first = String(fwd).split(',')[0].trim();
+    if (first) return first;
+  }
+  return req.ip || req.connection?.remoteAddress || 'unknown';
+}
+
+function isValidEmail(v) {
+  return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+app.post('/api/support-message', async (req, res) => {
+  const ip  = getClientIp(req);
+  const now = Date.now();
+
+  // ── Rate limit
+  const last = supportRateLimit.get(ip);
+  if (last && now - last < SUPPORT_RATE_WINDOW_MS) {
+    const retryAfter = Math.ceil((SUPPORT_RATE_WINDOW_MS - (now - last)) / 1000);
+    res.set('Retry-After', String(retryAfter));
+    return res.status(429).json({
+      error: "You're sending messages too fast. Please wait a minute.",
+      retryAfter,
+    });
+  }
+
+  // ── Validation
+  const { name, email, subject, message } = req.body || {};
+  if (!name || !email || !subject || !message) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'Invalid email address.' });
+  }
+  if (String(name).length > 200
+      || String(email).length > 320
+      || String(subject).length > 200
+      || String(message).length > 10000) {
+    return res.status(400).json({ error: 'One of your fields is too long.' });
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.error('[SUPPORT] RESEND_API_KEY not configured');
+    return res.status(500).json({ error: 'Email service is not configured.' });
+  }
+
+  // ── Send
+  try {
+    const safeName    = escapeHtml(name);
+    const safeEmail   = escapeHtml(email);
+    const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+
+    await resend.emails.send({
+      from:     'ThumbFrame Support <noreply@thumbframe.com>',
+      to:       'hello@thumbframe.com',
+      reply_to: email,
+      subject:  `[ThumbFrame Support] ${subject}`,
+      html: `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:560px;color:#1a1a1a;line-height:1.5">
+  <p style="margin:0 0 6px"><strong>From:</strong> ${safeName} &lt;${safeEmail}&gt;</p>
+  <hr style="border:none;border-top:1px solid #e5e5e5;margin:18px 0" />
+  <div style="font-size:15px;line-height:1.65;white-space:pre-wrap">${safeMessage}</div>
+  <hr style="border:none;border-top:1px solid #e5e5e5;margin:24px 0" />
+  <p style="color:#6b7280;font-size:12px;margin:0">Sent via thumbframe.com/support · IP ${escapeHtml(ip)}</p>
+</div>`,
+      text: `From: ${name} <${email}>\n\n${message}\n\n---\nSent via thumbframe.com/support`,
+    });
+
+    supportRateLimit.set(ip, now);
+
+    // Prune old entries so the map doesn't grow unbounded under prolonged load.
+    if (supportRateLimit.size > 500) {
+      const cutoff = now - SUPPORT_RATE_WINDOW_MS;
+      for (const [k, v] of supportRateLimit) {
+        if (v < cutoff) supportRateLimit.delete(k);
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[SUPPORT] Resend error:', err.message);
+    return res.status(500).json({ error: 'Could not send message. Please try again.' });
+  }
 });
 
 app.get('/api/ping', (req, res) => res.json({ pong: true, time: Date.now() }));
