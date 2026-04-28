@@ -35,6 +35,7 @@ console.log('[INIT] Resend client ready:', !!process.env.RESEND_API_KEY);
 const allowedOrigins = [
   'https://thumbframe.com',
   'https://www.thumbframe.com',
+  'https://editor.thumbframe.com',
   'http://localhost:3000',
   'http://localhost:5173',
   process.env.FRONTEND_URL?.trim(),
