@@ -3570,13 +3570,14 @@ try {
   console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
 }
 
-// ── Day 31: Brand Kit (public-API-key channel lookup) ─────────────────────────
+// ── Day 31/32: Brand Kit (public-API-key channel lookup + L2 cache) ───────────
 // Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
-// whether YOUTUBE_CLIENT_ID/SECRET are set.
+// whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client;
+// when null the route still works (in-memory cache only).
 try {
   const makeBrandKitRoutes = require('./routes/brandKit.js');
-  app.use('/api/youtube', makeBrandKitRoutes());
-  console.log('[INIT] Day 31 Brand Kit route mounted: /api/youtube/channel-by-url');
+  app.use('/api/youtube', makeBrandKitRoutes(supabase));
+  console.log('[INIT] Brand Kit route mounted: /api/youtube/channel-by-url (shared cache:', !!supabase, ')');
 } catch (err) {
   console.error('[INIT] Failed to mount Brand Kit route:', err.message);
 }

@@ -10,15 +10,18 @@
 // Quota cost per extraction: 3 units (channels.list + playlistItems.list +
 // videos.list). Default daily quota is 10,000 units → ~3,300 extractions/day.
 //
-// Day 32 swaps the in-memory cache for a Supabase brand_kits table.
+// Day 32: cross-user 24h cache lives in public.shared_brand_kits (Supabase).
+// In-memory Map is the L1 cache (1h, per-instance); Supabase is L2 (24h,
+// shared across all Railway instances + users).
 
 const express        = require('express');
 const fetch          = require('node-fetch');
 const { extractColors } = require('../lib/extractColors.js');
 
-const YT_BASE      = 'https://www.googleapis.com/youtube/v3';
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-const cache        = new Map(); // cacheKey → { data, ts }
+const YT_BASE          = 'https://www.googleapis.com/youtube/v3';
+const MEM_TTL_MS       = 60 * 60 * 1000;       // L1 (in-process) cache: 1h
+const SHARED_TTL_MS    = 24 * 60 * 60 * 1000;  // L2 (Supabase) cache: 24h
+const cache            = new Map(); // cacheKey → { data, ts }
 
 // ── Input parsing ─────────────────────────────────────────────────────────────
 // 5 supported shapes:
@@ -130,8 +133,39 @@ async function fetchUploads(uploadsPlaylistId, apiKey) {
   return json.items || [];
 }
 
+// ── Supabase shared-cache helpers ─────────────────────────────────────────────
+async function readSharedCache(supabase, channelId) {
+  if (!supabase || !channelId) return null;
+  const { data, error } = await supabase
+    .from('shared_brand_kits')
+    .select('payload, updated_at')
+    .eq('channel_id', channelId)
+    .maybeSingle();
+  if (error) {
+    console.warn('[BRAND-KIT] shared cache read failed:', error.message);
+    return null;
+  }
+  if (!data) return null;
+  const ageMs = Date.now() - new Date(data.updated_at).getTime();
+  if (ageMs > SHARED_TTL_MS) return null;
+  return data.payload;
+}
+
+async function writeSharedCache(supabase, channelId, payload) {
+  if (!supabase || !channelId) return;
+  const { error } = await supabase
+    .from('shared_brand_kits')
+    .upsert({ channel_id: channelId, payload }, { onConflict: 'channel_id' });
+  if (error) {
+    console.warn('[BRAND-KIT] shared cache write failed:', error.message);
+  }
+}
+
 // ── Factory ────────────────────────────────────────────────────────────────────
-module.exports = function makeBrandKitRoutes() {
+// `supabase` is the service-role client created in index.js; null when
+// SUPABASE_URL / SUPABASE_SERVICE_KEY aren't configured. Routes degrade
+// gracefully — in-memory cache still works.
+module.exports = function makeBrandKitRoutes(supabase) {
   const router = express.Router();
 
   // POST /channel-by-url
@@ -160,8 +194,19 @@ module.exports = function makeBrandKitRoutes() {
 
     const cacheKey = `${parsed.kind}:${parsed.value}`;
     const cached   = cache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    if (cached && Date.now() - cached.ts < MEM_TTL_MS) {
       return res.json({ ...cached.data, fromCache: true });
+    }
+
+    // L2: shared Supabase cache. We can only key by channelId, so kind=id
+    // hits L2 directly; @handle / username have to resolve through the
+    // channels.list call first to learn the id, then re-check L2 below.
+    if (parsed.kind === 'id') {
+      const shared = await readSharedCache(supabase, parsed.value);
+      if (shared) {
+        cache.set(cacheKey, { data: shared, ts: Date.now() });
+        return res.json({ ...shared, fromCache: true });
+      }
     }
 
     try {
@@ -171,6 +216,17 @@ module.exports = function makeBrandKitRoutes() {
           error: 'No channel found — try the @handle from the channel page',
           code:  'NOT_FOUND',
         });
+      }
+
+      // L2 second-chance: now that we know the canonical channelId, check
+      // the shared cache before paying for color extraction. Skips the
+      // playlistItems.list call too (saves 1 quota unit per warm hit).
+      if (parsed.kind !== 'id') {
+        const shared = await readSharedCache(supabase, channel.id);
+        if (shared) {
+          cache.set(cacheKey, { data: shared, ts: Date.now() });
+          return res.json({ ...shared, fromCache: true });
+        }
       }
 
       const uploadsPlaylistId =
@@ -238,6 +294,8 @@ module.exports = function makeBrandKitRoutes() {
       };
 
       cache.set(cacheKey, { data, ts: Date.now() });
+      // Fire-and-forget L2 write; don't block the response.
+      void writeSharedCache(supabase, channel.id, data);
       return res.json(data);
     } catch (err) {
       const status  = err.status || 500;
