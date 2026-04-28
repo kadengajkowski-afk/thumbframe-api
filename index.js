@@ -3570,6 +3570,17 @@ try {
   console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
 }
 
+// ── Day 31: Brand Kit (public-API-key channel lookup) ─────────────────────────
+// Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
+// whether YOUTUBE_CLIENT_ID/SECRET are set.
+try {
+  const makeBrandKitRoutes = require('./routes/brandKit.js');
+  app.use('/api/youtube', makeBrandKitRoutes());
+  console.log('[INIT] Day 31 Brand Kit route mounted: /api/youtube/channel-by-url');
+} catch (err) {
+  console.error('[INIT] Failed to mount Brand Kit route:', err.message);
+}
+
 // ── Phase 15: YouTube Integration ─────────────────────────────────────────────
 try {
   const makeYouTubeRoutes = require('./routes/youtube.js');
