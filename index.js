@@ -869,12 +869,58 @@ app.post('/api/create-checkout-session', flexAuthMiddleware, async (req, res) =>
 });
 
 // ── Stripe Customer Portal ─────────────────────────────────────────────────────
+// Day 38 — stripe_customer_id now reads from Supabase profiles (the
+// webhook's source of truth). Falls back to users.json for legacy
+// users whose webhook ran before the Supabase sync landed. Then falls
+// back to a Stripe customer search by email so a user whose row got
+// orphaned (Railway restart wiped users.json before the sync) can
+// still reach the portal without an admin force-pro.
 app.post('/api/create-portal-session', flexAuthMiddleware, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured — STRIPE_SECRET_KEY missing' });
   try {
-    const users = loadUsers();
-    const stripeCustomerId = (users[req.user.email] || {}).stripeCustomerId;
-    if (!stripeCustomerId) return res.status(400).json({ error: 'No Stripe customer found. Complete a checkout first.' });
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ error: 'Not authenticated' });
+
+    let stripeCustomerId = null;
+
+    // 1. Supabase profiles (post-Day-38 source of truth)
+    if (supabase) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('stripe_customer_id')
+        .eq('email', email)
+        .maybeSingle();
+      if (profile?.stripe_customer_id) stripeCustomerId = profile.stripe_customer_id;
+    }
+
+    // 2. Legacy users.json fallback
+    if (!stripeCustomerId) {
+      const users = loadUsers();
+      stripeCustomerId = (users[email] || {}).stripeCustomerId || null;
+    }
+
+    // 3. Stripe customer search by email — last resort for orphaned users
+    if (!stripeCustomerId) {
+      try {
+        const search = await stripe.customers.list({ email, limit: 1 });
+        if (search.data.length > 0) {
+          stripeCustomerId = search.data[0].id;
+          // Backfill profiles so next call hits the fast path.
+          if (supabase) {
+            await supabase
+              .from('profiles')
+              .upsert({ email, stripe_customer_id: stripeCustomerId }, { onConflict: 'email' });
+          }
+        }
+      } catch (e) {
+        console.warn('[portal] customer search failed:', e.message);
+      }
+    }
+
+    if (!stripeCustomerId) {
+      return res.status(400).json({ error: 'No Stripe customer found. Complete a checkout first.' });
+    }
+
     const session = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
       return_url: `${process.env.FRONTEND_URL || 'https://thumbframe.com'}/account`,
