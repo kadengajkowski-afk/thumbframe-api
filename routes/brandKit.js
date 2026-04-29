@@ -17,6 +17,7 @@
 const express        = require('express');
 const fetch          = require('node-fetch');
 const { extractColors } = require('../lib/extractColors.js');
+const { detectFonts }   = require('../lib/detectFonts.js');
 
 const YT_BASE          = 'https://www.googleapis.com/youtube/v3';
 const MEM_TTL_MS       = 60 * 60 * 1000;       // L1 (in-process) cache: 1h
@@ -163,9 +164,11 @@ async function writeSharedCache(supabase, channelId, payload) {
 
 // ── Factory ────────────────────────────────────────────────────────────────────
 // `supabase` is the service-role client created in index.js; null when
-// SUPABASE_URL / SUPABASE_SERVICE_KEY aren't configured. Routes degrade
-// gracefully — in-memory cache still works.
-module.exports = function makeBrandKitRoutes(supabase) {
+// SUPABASE_URL / SUPABASE_SERVICE_KEY aren't configured. `anthropic` is
+// the Claude SDK client; null when ANTHROPIC_API_KEY isn't set. Routes
+// degrade gracefully — in-memory cache still works without supabase,
+// font detection is just skipped without anthropic.
+module.exports = function makeBrandKitRoutes(supabase, anthropic) {
   const router = express.Router();
 
   // POST /channel-by-url
@@ -262,19 +265,28 @@ module.exports = function makeBrandKitRoutes(supabase) {
       const avatarUrl = av.high?.url || av.medium?.url || av.default?.url || null;
 
       // ── Color extraction (server-side k-means via sharp) ────────────────
+      // ── Font detection (Claude Sonnet 4.6 vision) ──────────────────────
+      // Both run in parallel — colors are sharp-CPU-bound, fonts are
+      // network-bound to Anthropic. Total wall time is roughly the
+      // slower of the two (~3-5s for vision) instead of the sum.
+      const thumbUrls = recentThumbnails.map((t) => t.url);
+      const [colorResult, fontResult] = await Promise.allSettled([
+        extractColors({ avatarUrl, thumbnails: thumbUrls }),
+        detectFonts({ anthropic, thumbnailUrls: thumbUrls }),
+      ]);
+
       let palette = [];
       let primaryAccent = null;
-      try {
-        const result = await extractColors({
-          avatarUrl,
-          thumbnails: recentThumbnails.map((t) => t.url),
-        });
-        palette = result.palette;
-        primaryAccent = result.primaryAccent;
-      } catch (extractErr) {
-        console.warn('[BRAND-KIT] color extraction failed:', extractErr.message);
-        // Non-fatal — return the kit without colors so the user sees a
-        // partial result rather than a hard error.
+      if (colorResult.status === 'fulfilled') {
+        palette = colorResult.value.palette;
+        primaryAccent = colorResult.value.primaryAccent;
+      } else {
+        console.warn('[BRAND-KIT] color extraction failed:', colorResult.reason?.message);
+      }
+
+      const fonts = fontResult.status === 'fulfilled' ? fontResult.value : [];
+      if (fontResult.status === 'rejected') {
+        console.warn('[BRAND-KIT] font detection failed:', fontResult.reason?.message);
       }
 
       const data = {
@@ -291,6 +303,7 @@ module.exports = function makeBrandKitRoutes(supabase) {
         recentThumbnails,
         palette,
         primaryAccent,
+        fonts,
       };
 
       cache.set(cacheKey, { data, ts: Date.now() });

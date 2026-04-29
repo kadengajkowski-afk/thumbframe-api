@@ -3570,14 +3570,15 @@ try {
   console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
 }
 
-// ── Day 31/32: Brand Kit (public-API-key channel lookup + L2 cache) ───────────
+// ── Day 31/32/33: Brand Kit (channel lookup + L2 cache + font detection) ─────
 // Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
-// whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client;
-// when null the route still works (in-memory cache only).
+// whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client
+// (L2 cache, optional). anthropic = vision client for font detection
+// (optional — degrades to colors-only when unset).
 try {
   const makeBrandKitRoutes = require('./routes/brandKit.js');
-  app.use('/api/youtube', makeBrandKitRoutes(supabase));
-  console.log('[INIT] Brand Kit route mounted: /api/youtube/channel-by-url (shared cache:', !!supabase, ')');
+  app.use('/api/youtube', makeBrandKitRoutes(supabase, anthropic));
+  console.log('[INIT] Brand Kit route mounted (shared cache:', !!supabase, ', font detection:', !!process.env.ANTHROPIC_API_KEY, ')');
 } catch (err) {
   console.error('[INIT] Failed to mount Brand Kit route:', err.message);
 }

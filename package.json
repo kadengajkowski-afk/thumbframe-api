@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "build": "echo 'no build step'",
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
