@@ -3580,6 +3580,17 @@ try {
   console.error('[INIT] Failed to mount AI proxy route:', err.message);
 }
 
+// ── Day 36: Pro-tier HD background removal proxy ─────────────────────────────
+// /api/bg-remove — POST removes HD bg via Remove.bg; Pro-gated, 100/mo cap.
+// Distinct from /api/remove-bg (v1, no Pro gate, separate bg_removals log).
+try {
+  const makeBgRemoveRoutes = require('./routes/bgRemove.js');
+  app.use('/api/bg-remove', makeBgRemoveRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Day 36 HD bg-remove route mounted at /api/bg-remove');
+} catch (err) {
+  console.error('[INIT] Failed to mount Day 36 bg-remove route:', err.message);
+}
+
 // ── Day 31/32/33: Brand Kit (channel lookup + L2 cache + font detection) ─────
 // Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
 // whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client
