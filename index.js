@@ -3570,6 +3570,16 @@ try {
   console.error('[INIT] Failed to mount Phase 12-14 routes:', err.message);
 }
 
+// ── Day 34: AI proxy (Claude routing + SSE streaming) ────────────────────────
+// Per-user rate limit (free=5/day) backed by ai_usage_events; usage logged
+// on every call. Mounted with the global anthropic + supabase clients.
+try {
+  const makeAiRoutes = require('./routes/ai.js');
+  app.use('/api/ai', makeAiRoutes(supabase, anthropic, flexAuthMiddleware));
+} catch (err) {
+  console.error('[INIT] Failed to mount AI proxy route:', err.message);
+}
+
 // ── Day 31/32/33: Brand Kit (channel lookup + L2 cache + font detection) ─────
 // Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
 // whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client
