@@ -1,30 +1,35 @@
 'use strict';
 
-// ── Day 36 — Pro-tier HD background removal proxy ─────────────────────────────
+// ── Cycle 6 — HD background removal proxy ─────────────────────────────────────
 // POST /api/bg-remove
 //   Body: { bitmap: <raw base64 PNG>, mode: 'hd' | 'standard' }
 //   Auth: Authorization: Bearer <supabase access token> (via flexAuth)
 //   Resp: { bitmap: <raw base64 PNG> }
 //
-// Pro tier only. Free tier returns 403 with code=PRO_REQUIRED.
-// Pro tier: counts toward 100/month quota — enforced via count(*)
-// against ai_usage_events filtered by intent='bg-remove-hd'. Logs to
-// ai_usage_events with model='removebg', intent='bg-remove-hd'.
+// Free tier: 3 trial HD removes/month — converts free → Pro by letting
+// users feel the quality before committing. Cost: $0.20 each, max
+// $0.60/free user/month.
 //
-// REMOVE_BG_API_KEY (or REMOVEBG_API_KEY) lives in Railway env. Cost:
-// ~$0.20 per HD call. The Pro 100/mo cap keeps worst-case bill at $20/mo.
+// Pro tier: 100 HD removes/month.
+//
+// Both quotas enforced via count(*) against ai_usage_events filtered
+// by intent='bg-remove-hd'. Logs to ai_usage_events with
+// model='removebg', intent='bg-remove-hd' on success.
+//
+// REMOVE_BG_API_KEY (or REMOVEBG_API_KEY) lives in Railway env. Worst-case
+// cost cap = (Pro users × $20) + (free users × $0.60).
 
 const express = require('express');
 
 const PRO_MONTHLY_LIMIT = 100;
+const FREE_MONTHLY_LIMIT = 3;
 const HD_COST_USD = 0.20;
 
-async function checkProQuota(supabase, user) {
-  if (user?.is_dev) return { allowed: true, remaining: -1 };
+async function checkQuota(supabase, user, isPro) {
+  const limit = isPro ? PRO_MONTHLY_LIMIT : FREE_MONTHLY_LIMIT;
+  if (user?.is_dev) return { allowed: true, remaining: -1, limit };
   if (!supabase || !user?.id) {
-    // Fail open when Supabase isn't configured. Real installs always
-    // have it; this is for local dev only.
-    return { allowed: true, remaining: PRO_MONTHLY_LIMIT };
+    return { allowed: true, remaining: limit, limit };
   }
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { count, error } = await supabase
@@ -35,13 +40,14 @@ async function checkProQuota(supabase, user) {
     .gte('created_at', since);
   if (error) {
     console.warn('[bg-remove] quota query failed:', error.message);
-    return { allowed: true, remaining: PRO_MONTHLY_LIMIT };
+    return { allowed: true, remaining: limit, limit };
   }
   const used = count || 0;
   return {
-    allowed: used < PRO_MONTHLY_LIMIT,
-    remaining: Math.max(0, PRO_MONTHLY_LIMIT - used),
+    allowed: used < limit,
+    remaining: Math.max(0, limit - used),
     used,
+    limit,
   };
 }
 
@@ -85,19 +91,20 @@ module.exports = function makeBgRemoveRoutes(supabase, flexAuth) {
     }
 
     const user = req.user;
-    const isPro = user?.is_pro || user?.plan === 'pro' || user?.is_dev;
-    if (!isPro) {
-      return res.status(403).json({
-        error: 'Upgrade to Pro for HD background removal',
-        code: 'PRO_REQUIRED',
-      });
-    }
+    const isPro = !!(user?.is_pro || user?.plan === 'pro' || user?.is_dev);
 
-    const quota = await checkProQuota(supabase, user);
+    const quota = await checkQuota(supabase, user, isPro);
     if (!quota.allowed) {
-      return res.status(429).json({
-        error: `${PRO_MONTHLY_LIMIT}/month HD removals used — resets in 30 days`,
-        code: 'RATE_LIMITED',
+      if (isPro) {
+        return res.status(429).json({
+          error: `${PRO_MONTHLY_LIMIT}/month HD removals used — resets in 30 days`,
+          code: 'RATE_LIMITED',
+          remaining: 0,
+        });
+      }
+      return res.status(403).json({
+        error: `${FREE_MONTHLY_LIMIT} free removes used — upgrade to Pro for ${PRO_MONTHLY_LIMIT}/month`,
+        code: 'FREE_LIMIT_REACHED',
         remaining: 0,
       });
     }
@@ -148,24 +155,16 @@ module.exports = function makeBgRemoveRoutes(supabase, flexAuth) {
     return res.json({ bitmap: resultBase64, format: 'png' });
   });
 
-  // GET /quota — Pro user's HD remaining for the month
+  // GET /quota — current month's HD remaining (free or Pro)
   router.get('/quota', flexAuth, async (req, res) => {
     const user = req.user;
-    const isPro = user?.is_pro || user?.plan === 'pro' || user?.is_dev;
-    if (!isPro) {
-      return res.json({
-        isPro: false,
-        used: 0,
-        remaining: 0,
-        limit: PRO_MONTHLY_LIMIT,
-      });
-    }
-    const q = await checkProQuota(supabase, user);
+    const isPro = !!(user?.is_pro || user?.plan === 'pro' || user?.is_dev);
+    const q = await checkQuota(supabase, user, isPro);
     return res.json({
-      isPro: true,
+      isPro,
       used: q.used ?? 0,
       remaining: q.remaining,
-      limit: PRO_MONTHLY_LIMIT,
+      limit: q.limit,
     });
   });
 
