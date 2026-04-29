@@ -3591,6 +3591,18 @@ try {
   console.error('[INIT] Failed to mount Day 36 bg-remove route:', err.message);
 }
 
+// ── Day 37: fal.ai image generation proxy ────────────────────────────────────
+// /api/image-gen — POST streams 4 variants via SSE. Three models routed
+// by intent: Flux Schnell (thumbnail-bg), Ideogram 3 (text-in-image),
+// Nano Banana / Flux Kontext (reference-guided). Free=3/mo, Pro=40/mo.
+try {
+  const makeImageGenRoutes = require('./routes/imageGen.js');
+  app.use('/api/image-gen', makeImageGenRoutes(supabase, flexAuthMiddleware));
+  console.log('[INIT] Day 37 image-gen route mounted at /api/image-gen (fal:', !!process.env.FAL_API_KEY, ')');
+} catch (err) {
+  console.error('[INIT] Failed to mount Day 37 image-gen route:', err.message);
+}
+
 // ── Day 31/32/33: Brand Kit (channel lookup + L2 cache + font detection) ─────
 // Mounted BEFORE the OAuth router so /channel-by-url wins regardless of
 // whether YOUTUBE_CLIENT_ID/SECRET are set. supabase = service-role client
