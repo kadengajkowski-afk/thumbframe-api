@@ -187,6 +187,7 @@ module.exports = function makeBrandKitRoutes(supabase, anthropic) {
     }
 
     const raw = (req.body?.input || '').toString();
+    const bypassCache = req.body?.bypassCache === true;
     const parsed = parseChannelInput(raw);
     if (!parsed) {
       return res.status(400).json({
@@ -196,15 +197,17 @@ module.exports = function makeBrandKitRoutes(supabase, anthropic) {
     }
 
     const cacheKey = `${parsed.kind}:${parsed.value}`;
-    const cached   = cache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < MEM_TTL_MS) {
-      return res.json({ ...cached.data, fromCache: true });
+    if (!bypassCache) {
+      const cached = cache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < MEM_TTL_MS) {
+        return res.json({ ...cached.data, fromCache: true });
+      }
     }
 
     // L2: shared Supabase cache. We can only key by channelId, so kind=id
     // hits L2 directly; @handle / username have to resolve through the
     // channels.list call first to learn the id, then re-check L2 below.
-    if (parsed.kind === 'id') {
+    if (!bypassCache && parsed.kind === 'id') {
       const shared = await readSharedCache(supabase, parsed.value);
       if (shared) {
         cache.set(cacheKey, { data: shared, ts: Date.now() });
@@ -224,7 +227,7 @@ module.exports = function makeBrandKitRoutes(supabase, anthropic) {
       // L2 second-chance: now that we know the canonical channelId, check
       // the shared cache before paying for color extraction. Skips the
       // playlistItems.list call too (saves 1 quota unit per warm hit).
-      if (parsed.kind !== 'id') {
+      if (!bypassCache && parsed.kind !== 'id') {
         const shared = await readSharedCache(supabase, channel.id);
         if (shared) {
           cache.set(cacheKey, { data: shared, ts: Date.now() });
