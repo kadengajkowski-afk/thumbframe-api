@@ -11,42 +11,49 @@ const aiRoutes = require('../routes/ai.js');
 
 // ── Day 40 — getSystemPrompt appends canvasState ─────────────────────────────
 
-test('getSystemPrompt: appends Current canvas block when canvasState provided', () => {
+test('getSystemPrompt: appends CANVAS STATE block when canvasState provided', () => {
   const prompt = getSystemPrompt('edit', {
     canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: 'L1', layers: [] },
   });
-  assert.ok(prompt.includes('Current canvas (full JSON):'));
-  assert.ok(prompt.includes('"focused_layer_id": "L1"'));
+  assert.ok(prompt.includes('CANVAS STATE'));
+  assert.ok(prompt.includes('available_layer_ids = []'));
+  assert.ok(prompt.includes('focused_layer_id = "L1"'));
 });
 
-test('getSystemPrompt: lists valid layer_ids verbatim when layers exist', () => {
+test('getSystemPrompt: available_layer_ids array carries every id verbatim', () => {
   const prompt = getSystemPrompt('edit', {
     canvasState: {
       canvas: { width: 1280, height: 720 },
       focused_layer_id: 'V1bL3xyz',
       layers: [
         { id: 'V1bL3xyz', type: 'rect', name: 'Rect ca4w', x: 0, y: 0, width: 200, height: 100, opacity: 1 },
+        { id: 'X4gd8PCT', type: 'text', name: 'Text foo',  x: 0, y: 0, width: 100, height: 30,  opacity: 1 },
       ],
     },
   });
-  // Layer-id list block must appear and carry the exact id string.
-  assert.ok(prompt.includes('Valid layer_ids'));
-  assert.ok(prompt.includes('"V1bL3xyz"'));
-  // Focused-layer hint must reference the same id, not the name.
-  assert.ok(prompt.includes('Focused layer'));
-  assert.ok(/Focused layer.*"V1bL3xyz"/.test(prompt));
+  // The model should see a JSON array of strings — not a bulleted list.
+  assert.ok(prompt.includes('available_layer_ids = ["V1bL3xyz","X4gd8PCT"]'));
+  assert.ok(prompt.includes('focused_layer_id = "V1bL3xyz"'));
 });
 
-test('getSystemPrompt: tells the model to refuse layer tools on empty canvas', () => {
+test('getSystemPrompt: empty canvas warns model not to call layer tools', () => {
   const prompt = getSystemPrompt('edit', {
     canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: null, layers: [] },
   });
-  assert.ok(/no layers/i.test(prompt));
+  assert.ok(/canvas is empty/i.test(prompt));
+  assert.ok(/DO NOT call/.test(prompt));
 });
 
-test('getSystemPrompt: layer_id rules call out "do NOT invent"', () => {
+test('getSystemPrompt: layer_id rules call out "Do NOT generate"', () => {
   const prompt = getSystemPrompt('edit');
-  assert.ok(/do NOT invent/i.test(prompt));
+  assert.ok(/Do NOT generate new ids/i.test(prompt));
+  assert.ok(/character-by-character/i.test(prompt.toLowerCase()));
+});
+
+test('getSystemPrompt: color rules require #RRGGBB hex with leading hash', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.ok(/#RRGGBB/.test(prompt));
+  assert.ok(/leading hash/i.test(prompt));
 });
 
 test('getSystemPrompt: omits canvas block when context missing', () => {
