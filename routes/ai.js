@@ -96,7 +96,7 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
 
   // POST /chat — SSE stream
   router.post('/chat', flexAuth, async (req, res) => {
-    const { messages, intent: rawIntent, canvasImage } = req.body || {};
+    const { messages, intent: rawIntent, canvasImage, tools, canvasState } = req.body || {};
     const intent = ['classify', 'edit', 'plan', 'deep-think'].includes(rawIntent)
       ? rawIntent
       : 'edit';
@@ -124,7 +124,7 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
       : messages;
 
     const model = modelForIntent(intent);
-    const systemPrompt = getSystemPrompt(intent, { canvasState: req.body?.canvasState });
+    const systemPrompt = getSystemPrompt(intent, { canvasState });
     const maxTokens = MAX_TOKENS[intent] || MAX_TOKENS.edit;
 
     setSseHeaders(res);
@@ -134,12 +134,25 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
     let tokensOut = 0;
 
     try {
-      const stream = await anthropic.messages.stream({
+      // Day 40 — when caller supplies tools, pass them through. Anthropic
+      // emits content blocks of type=tool_use; we extract them from the
+      // final message and forward as `tool_call` SSE frames so the
+      // frontend executor can run them locally. Streaming tool args
+      // (input_json_delta) is the cleanest path long-term, but the
+      // Anthropic SDK's `stream.on('text')` only covers text deltas —
+      // we surface tool_use blocks at finalMessage time. The user-facing
+      // wait is identical because tool args are tiny vs the assistant's
+      // text reply.
+      const streamArgs = {
         model,
         max_tokens: maxTokens,
         system:     systemPrompt,
         messages:   enrichedMessages,
-      });
+      };
+      if (Array.isArray(tools) && tools.length > 0) {
+        streamArgs.tools = tools;
+      }
+      const stream = await anthropic.messages.stream(streamArgs);
 
       stream.on('text', (textDelta) => {
         sse(res, { type: 'chunk', text: textDelta });
@@ -148,6 +161,19 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
       const final = await stream.finalMessage();
       tokensIn  = final.usage?.input_tokens  || 0;
       tokensOut = final.usage?.output_tokens || 0;
+
+      // Forward each tool_use content block as a tool_call SSE frame.
+      const blocks = Array.isArray(final.content) ? final.content : [];
+      for (const block of blocks) {
+        if (block && block.type === 'tool_use') {
+          sse(res, {
+            type: 'tool_call',
+            id:    block.id,
+            name:  block.name,
+            input: block.input,
+          });
+        }
+      }
 
       sse(res, { type: 'usage', tokensIn, tokensOut });
       res.write('data: [DONE]\n\n');

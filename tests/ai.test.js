@@ -9,6 +9,28 @@ const { computeCost, modelForIntent, _PRICING } = require('../lib/aiCost.js');
 const { getSystemPrompt, _BASE_VOICE, _INTENT_PROMPTS } = require('../lib/aiPrompts.js');
 const aiRoutes = require('../routes/ai.js');
 
+// ── Day 40 — getSystemPrompt appends canvasState ─────────────────────────────
+
+test('getSystemPrompt: appends Current canvas block when canvasState provided', () => {
+  const prompt = getSystemPrompt('edit', {
+    canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: 'L1', layers: [] },
+  });
+  assert.ok(prompt.includes('Current canvas:'));
+  assert.ok(prompt.includes('"focused_layer_id": "L1"'));
+});
+
+test('getSystemPrompt: omits canvas block when context missing', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.equal(prompt.includes('Current canvas:'), false);
+});
+
+test('getSystemPrompt: edit prompt mentions tool capabilities (Day 40)', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.ok(/tool/i.test(prompt));
+  // Phrase wraps over a newline in the source — match across whitespace.
+  assert.ok(/never say\s+"I\s*\n?\s*can't"/i.test(prompt));
+});
+
 // ── modelForIntent ────────────────────────────────────────────────────────────
 
 test('modelForIntent: classify → Haiku', () => {
