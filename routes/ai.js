@@ -151,7 +151,21 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
       };
       if (Array.isArray(tools) && tools.length > 0) {
         streamArgs.tools = tools;
+        // Day 40 fix-3 — explicitly opt into auto tool_choice and
+        // disable parallel tool use to keep emit ordering deterministic.
+        streamArgs.tool_choice = { type: 'auto' };
       }
+
+      // Day 40 fix-3 — diagnostic logging so we can see exactly what's
+      // reaching the model when tool calls come back malformed. Trim
+      // the canvas state shape rather than dumping the full prompt.
+      if (process.env.AI_DEBUG === '1' || process.env.NODE_ENV !== 'production') {
+        const stateInfo = canvasState && canvasState.layers
+          ? `layers=${canvasState.layers.length} focused=${canvasState.focused_layer_id ?? 'null'}`
+          : 'no canvas_state';
+        console.log(`[AI] chat call: intent=${intent} model=${model} tools=${(streamArgs.tools || []).length} ${stateInfo}`);
+      }
+
       const stream = await anthropic.messages.stream(streamArgs);
 
       stream.on('text', (textDelta) => {
@@ -164,8 +178,13 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
 
       // Forward each tool_use content block as a tool_call SSE frame.
       const blocks = Array.isArray(final.content) ? final.content : [];
+      const debug = process.env.AI_DEBUG === '1' || process.env.NODE_ENV !== 'production';
       for (const block of blocks) {
         if (block && block.type === 'tool_use') {
+          if (debug) {
+            const inputKeys = Object.keys(block.input || {});
+            console.log(`[AI] tool_use: ${block.name} input_keys=[${inputKeys.join(',')}] sample=${JSON.stringify(block.input).slice(0, 200)}`);
+          }
           sse(res, {
             type: 'tool_call',
             id:    block.id,

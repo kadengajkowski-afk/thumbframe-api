@@ -11,49 +11,38 @@ const aiRoutes = require('../routes/ai.js');
 
 // ── Day 40 — getSystemPrompt appends canvasState ─────────────────────────────
 
-test('getSystemPrompt: appends CANVAS STATE block when canvasState provided', () => {
-  const prompt = getSystemPrompt('edit', {
+test('getSystemPrompt: ignores canvasState (canvas state lives in the user message now)', () => {
+  // Day 40 fix-3 — frontend embeds canvas state in the latest user
+  // message. The system prompt no longer reads `context.canvasState`.
+  const withState = getSystemPrompt('edit', {
     canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: 'L1', layers: [] },
   });
-  assert.ok(prompt.includes('CANVAS STATE'));
-  assert.ok(prompt.includes('available_layer_ids = []'));
-  assert.ok(prompt.includes('focused_layer_id = "L1"'));
+  const without = getSystemPrompt('edit');
+  assert.equal(withState, without);
 });
 
-test('getSystemPrompt: available_layer_ids array carries every id verbatim', () => {
-  const prompt = getSystemPrompt('edit', {
-    canvasState: {
-      canvas: { width: 1280, height: 720 },
-      focused_layer_id: 'V1bL3xyz',
-      layers: [
-        { id: 'V1bL3xyz', type: 'rect', name: 'Rect ca4w', x: 0, y: 0, width: 200, height: 100, opacity: 1 },
-        { id: 'X4gd8PCT', type: 'text', name: 'Text foo',  x: 0, y: 0, width: 100, height: 30,  opacity: 1 },
-      ],
-    },
-  });
-  // The model should see a JSON array of strings — not a bulleted list.
-  assert.ok(prompt.includes('available_layer_ids = ["V1bL3xyz","X4gd8PCT"]'));
-  assert.ok(prompt.includes('focused_layer_id = "V1bL3xyz"'));
-});
-
-test('getSystemPrompt: empty canvas warns model not to call layer tools', () => {
-  const prompt = getSystemPrompt('edit', {
-    canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: null, layers: [] },
-  });
-  assert.ok(/canvas is empty/i.test(prompt));
-  assert.ok(/DO NOT call/.test(prompt));
-});
-
-test('getSystemPrompt: layer_id rules call out "Do NOT generate"', () => {
+test('getSystemPrompt: edit prompt carries the worked example with fake IDs', () => {
   const prompt = getSystemPrompt('edit');
-  assert.ok(/Do NOT generate new ids/i.test(prompt));
-  assert.ok(/character-by-character/i.test(prompt.toLowerCase()));
+  assert.ok(/WORKED EXAMPLE/.test(prompt));
+  // The fake ids appear verbatim so the model has a concrete pattern.
+  assert.ok(prompt.includes('"abcXYZ123_test"'));
+  assert.ok(prompt.includes('set_layer_fill(layer_id="abcXYZ123_test", color="#FF0000")'));
 });
 
-test('getSystemPrompt: color rules require #RRGGBB hex with leading hash', () => {
+test('getSystemPrompt: edit prompt requires every tool call to fill required fields', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.ok(/REQUIRED FIELDS/.test(prompt));
+  assert.ok(/Never emit a tool call with empty or partial input/i.test(prompt));
+});
+
+test('getSystemPrompt: edit prompt warns "name is not the id"', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.ok(/Never confuse them/i.test(prompt));
+});
+
+test('getSystemPrompt: color rules still call out #RRGGBB hex format', () => {
   const prompt = getSystemPrompt('edit');
   assert.ok(/#RRGGBB/.test(prompt));
-  assert.ok(/leading hash/i.test(prompt));
 });
 
 test('getSystemPrompt: omits canvas block when context missing', () => {
