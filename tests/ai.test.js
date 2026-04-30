@@ -160,6 +160,22 @@ test('getSystemPrompt: distinct crew_ids produce distinct system prompts', () =>
   assert.ok(navigator.includes('Navigator'));
 });
 
+// ── Day 43 — creation capability statements ─────────────────────────────────
+
+test('every crew prompt mentions ADD / MODIFY / BUILD capability scope', () => {
+  for (const [id, prompt] of Object.entries(CREW_PROMPTS)) {
+    assert.ok(/ADD/.test(prompt), `${id} prompt missing ADD callout`);
+    assert.ok(/MODIFY/.test(prompt), `${id} prompt missing MODIFY callout`);
+    assert.ok(/BUILD/.test(prompt), `${id} prompt missing BUILD callout`);
+  }
+});
+
+test('edit-intent prompt mentions set_canvas_background + add_text_layer for build-from-scratch', () => {
+  const prompt = getSystemPrompt('edit', { crewId: 'captain' });
+  assert.ok(prompt.includes('set_canvas_background'));
+  assert.ok(prompt.includes('add_text_layer'));
+});
+
 test('getSystemPrompt: omits canvas block when context missing', () => {
   const prompt = getSystemPrompt('edit');
   assert.equal(prompt.includes('Current canvas:'), false);
