@@ -45,6 +45,22 @@ test('getSystemPrompt: color rules still call out #RRGGBB hex format', () => {
   assert.ok(/#RRGGBB/.test(prompt));
 });
 
+// ── Day 40 fix-4 — max_tokens budget ─────────────────────────────────────────
+
+test('routes/ai.js MAX_TOKENS.edit ≥ 2048 (room for tool_use after long prompt)', () => {
+  // Re-require to read the module's internal constant via grep — the
+  // route module doesn't export MAX_TOKENS, so we read the source. This
+  // is a regression guard: if someone shrinks the budget back below
+  // 2048, the model will start truncating mid-tool-use again.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'ai.js'), 'utf8');
+  const m = src.match(/edit:\s*(\d+)/);
+  assert.ok(m, 'expected MAX_TOKENS.edit literal in routes/ai.js');
+  const budget = Number(m[1]);
+  assert.ok(budget >= 2048, `MAX_TOKENS.edit=${budget}, need ≥ 2048 for tool-use turns`);
+});
+
 test('getSystemPrompt: omits canvas block when context missing', () => {
   const prompt = getSystemPrompt('edit');
   assert.equal(prompt.includes('Current canvas:'), false);

@@ -17,9 +17,14 @@ const { getSystemPrompt } = require('../lib/aiPrompts.js');
 const { computeCost, modelForIntent } = require('../lib/aiCost.js');
 
 const FREE_DAILY_LIMIT = 5;
+// Day 40 fix-4 — edit intent bumped from 512 → 2048 because tool-use
+// turns can run long: ~150 tok system prompt + the per-turn [CANVAS
+// STATE] block in the user message + the model's text reply + the
+// JSON-encoded tool_use input. At 512 the model was truncating mid-
+// tool-use (stop_reason='max_tokens'), leaving block.input as {}.
 const MAX_TOKENS = {
   classify:      32,
-  edit:          512,
+  edit:          2048,
   plan:          1024,
   'deep-think':  4096,
 };
@@ -177,21 +182,72 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
       tokensOut = final.usage?.output_tokens || 0;
 
       // Forward each tool_use content block as a tool_call SSE frame.
+      // Day 40 fix-4 — log stop_reason so a `max_tokens` truncation is
+      // diagnosable from Railway logs. Salvage input from `input_json`
+      // when `block.input` parsed as empty (some SDK builds put the
+      // raw JSON on input_json and only deserialize on completion;
+      // when truncated, deserialization yields {} but the raw string
+      // may still be partial-but-parseable).
       const blocks = Array.isArray(final.content) ? final.content : [];
       const debug = process.env.AI_DEBUG === '1' || process.env.NODE_ENV !== 'production';
+      if (debug) {
+        console.log(`[AI] finalMessage stop_reason=${final.stop_reason} blocks=${blocks.length} tool_blocks=${blocks.filter((b) => b?.type === 'tool_use').length}`);
+      }
       for (const block of blocks) {
-        if (block && block.type === 'tool_use') {
-          if (debug) {
-            const inputKeys = Object.keys(block.input || {});
-            console.log(`[AI] tool_use: ${block.name} input_keys=[${inputKeys.join(',')}] sample=${JSON.stringify(block.input).slice(0, 200)}`);
+        if (!block || block.type !== 'tool_use') continue;
+        let input = block.input && typeof block.input === 'object' ? block.input : {};
+        const inputJsonRaw = typeof block.input_json === 'string' ? block.input_json : null;
+
+        // Salvage: if .input came back empty but .input_json carries
+        // bytes, try to parse those.
+        if (Object.keys(input).length === 0 && inputJsonRaw) {
+          try {
+            const parsed = JSON.parse(inputJsonRaw);
+            if (parsed && typeof parsed === 'object') input = parsed;
+          } catch {
+            // partial JSON — best-effort: try trimming a trailing comma
+            // or adding a closing brace. If still bad, leave empty.
+            for (const candidate of [
+              inputJsonRaw + '}',
+              inputJsonRaw.replace(/,\s*$/, '') + '}',
+            ]) {
+              try {
+                const parsed = JSON.parse(candidate);
+                if (parsed && typeof parsed === 'object') {
+                  input = parsed;
+                  break;
+                }
+              } catch { /* keep trying */ }
+            }
           }
-          sse(res, {
-            type: 'tool_call',
-            id:    block.id,
-            name:  block.name,
-            input: block.input,
-          });
         }
+
+        if (debug) {
+          const inputKeys = Object.keys(input);
+          const sample = JSON.stringify(input).slice(0, 200);
+          const rawSample = inputJsonRaw ? inputJsonRaw.slice(0, 200) : null;
+          console.log(`[AI] tool_use: ${block.name} input_keys=[${inputKeys.join(',')}] sample=${sample}` + (rawSample ? ` raw=${rawSample}` : ''));
+        }
+
+        // Day 40 fix-4 — DROP empty tool calls. An empty input would
+        // surface as "Layer not found" / "Invalid color" garbage in
+        // the chat. Surface a clean error frame instead so the panel
+        // can render a helpful message.
+        if (Object.keys(input).length === 0) {
+          sse(res, {
+            type: 'error',
+            message:
+              `${block.name} called with no arguments — likely truncated by max_tokens (stop_reason=${final.stop_reason}). Try a shorter request or fewer simultaneous edits.`,
+          });
+          continue;
+        }
+
+        sse(res, {
+          type: 'tool_call',
+          id:    block.id,
+          name:  block.name,
+          input,
+        });
       }
 
       sse(res, { type: 'usage', tokensIn, tokensOut });
