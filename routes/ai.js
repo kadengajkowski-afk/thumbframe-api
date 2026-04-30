@@ -174,83 +174,92 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
         console.log(`[AI] chat call: intent=${intent} model=${model} tools=${(streamArgs.tools || []).length} ${stateInfo}`);
       }
 
-      const stream = await anthropic.messages.stream(streamArgs);
+      const stream = anthropic.messages.stream(streamArgs);
 
-      stream.on('text', (textDelta) => {
-        sse(res, { type: 'chunk', text: textDelta });
-      });
+      // Day 40 fix-6 — iterate RAW Anthropic events ourselves so we
+      // can accumulate `input_json_delta` payloads per tool_use block
+      // index. The SDK's `finalMessage().content[i].input` was
+      // returning {} on clean finishes (stop_reason='tool_use', not
+      // max_tokens). With raw events we own the buffering: every
+      // partial_json fragment is appended to a per-index accumulator;
+      // at content_block_stop we JSON.parse it and emit the tool_call
+      // SSE frame. Text deltas still pass through verbatim.
+      //
+      // Anthropic event shapes (see Anthropic streaming docs):
+      //   { type: 'message_start', message: {...} }
+      //   { type: 'content_block_start', index, content_block: { type, id, name, input } }
+      //   { type: 'content_block_delta', index, delta: { type: 'text_delta'|'input_json_delta', text|partial_json } }
+      //   { type: 'content_block_stop', index }
+      //   { type: 'message_delta', delta: { stop_reason }, usage }
+      //   { type: 'message_stop' }
 
-      const final = await stream.finalMessage();
-      tokensIn  = final.usage?.input_tokens  || 0;
-      tokensOut = final.usage?.output_tokens || 0;
-
-      // Forward each tool_use content block as a tool_call SSE frame.
-      // Day 40 fix-4 — log stop_reason so a `max_tokens` truncation is
-      // diagnosable from Railway logs. Salvage input from `input_json`
-      // when `block.input` parsed as empty (some SDK builds put the
-      // raw JSON on input_json and only deserialize on completion;
-      // when truncated, deserialization yields {} but the raw string
-      // may still be partial-but-parseable).
-      const blocks = Array.isArray(final.content) ? final.content : [];
       const debug = process.env.AI_DEBUG === '1' || process.env.NODE_ENV !== 'production';
-      if (debug) {
-        console.log(`[AI] finalMessage stop_reason=${final.stop_reason} blocks=${blocks.length} tool_blocks=${blocks.filter((b) => b?.type === 'tool_use').length}`);
-      }
-      for (const block of blocks) {
-        if (!block || block.type !== 'tool_use') continue;
-        let input = block.input && typeof block.input === 'object' ? block.input : {};
-        const inputJsonRaw = typeof block.input_json === 'string' ? block.input_json : null;
+      const toolBuffers = new Map(); // index → { id, name, jsonAcc }
+      let stopReason = null;
 
-        // Salvage: if .input came back empty but .input_json carries
-        // bytes, try to parse those.
-        if (Object.keys(input).length === 0 && inputJsonRaw) {
-          try {
-            const parsed = JSON.parse(inputJsonRaw);
-            if (parsed && typeof parsed === 'object') input = parsed;
-          } catch {
-            // partial JSON — best-effort: try trimming a trailing comma
-            // or adding a closing brace. If still bad, leave empty.
-            for (const candidate of [
-              inputJsonRaw + '}',
-              inputJsonRaw.replace(/,\s*$/, '') + '}',
-            ]) {
-              try {
-                const parsed = JSON.parse(candidate);
-                if (parsed && typeof parsed === 'object') {
-                  input = parsed;
-                  break;
-                }
-              } catch { /* keep trying */ }
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          const cb = event.content_block;
+          if (cb && cb.type === 'tool_use') {
+            toolBuffers.set(event.index, {
+              id:      cb.id,
+              name:    cb.name,
+              jsonAcc: '',
+            });
+          }
+        } else if (event.type === 'content_block_delta') {
+          const d = event.delta;
+          if (!d) continue;
+          if (d.type === 'text_delta' && typeof d.text === 'string') {
+            sse(res, { type: 'chunk', text: d.text });
+          } else if (d.type === 'input_json_delta' && typeof d.partial_json === 'string') {
+            const buf = toolBuffers.get(event.index);
+            if (buf) buf.jsonAcc += d.partial_json;
+          }
+        } else if (event.type === 'content_block_stop') {
+          // Tool block fully streamed — parse + emit immediately.
+          const buf = toolBuffers.get(event.index);
+          if (buf) {
+            const input = parseToolInput(buf.jsonAcc);
+            if (debug) {
+              console.log(`[AI] complete tool_use input: name=${buf.name} keys=[${Object.keys(input).join(',')}] raw=${buf.jsonAcc.slice(0, 200)}`);
             }
+            if (Object.keys(input).length === 0) {
+              sse(res, {
+                type: 'error',
+                message: `${buf.name} called with no arguments — model emitted an empty tool_use block. Try rephrasing your request.`,
+              });
+            } else {
+              sse(res, {
+                type: 'tool_call',
+                id:    buf.id,
+                name:  buf.name,
+                input,
+              });
+            }
+            toolBuffers.delete(event.index);
+          }
+        } else if (event.type === 'message_delta') {
+          if (event.delta && event.delta.stop_reason) stopReason = event.delta.stop_reason;
+          if (event.usage) {
+            tokensIn  = event.usage.input_tokens  ?? tokensIn;
+            tokensOut = event.usage.output_tokens ?? tokensOut;
           }
         }
+      }
 
+      // finalMessage() resolves the assembled message. Use it ONLY for
+      // usage totals if we didn't get them from message_delta — the
+      // tool inputs above are already authoritative.
+      try {
+        const final = await stream.finalMessage();
+        tokensIn  = final.usage?.input_tokens  ?? tokensIn;
+        tokensOut = final.usage?.output_tokens ?? tokensOut;
         if (debug) {
-          const inputKeys = Object.keys(input);
-          const sample = JSON.stringify(input).slice(0, 200);
-          const rawSample = inputJsonRaw ? inputJsonRaw.slice(0, 200) : null;
-          console.log(`[AI] tool_use: ${block.name} input_keys=[${inputKeys.join(',')}] sample=${sample}` + (rawSample ? ` raw=${rawSample}` : ''));
+          console.log(`[AI] finalMessage stop_reason=${final.stop_reason ?? stopReason} tokensIn=${tokensIn} tokensOut=${tokensOut}`);
         }
-
-        // Day 40 fix-4 — DROP empty tool calls. An empty input would
-        // surface as "Layer not found" / "Invalid color" garbage in
-        // the chat. Surface a clean error frame instead so the panel
-        // can render a helpful message.
-        if (Object.keys(input).length === 0) {
-          sse(res, {
-            type: 'error',
-            message:
-              `${block.name} called with no arguments — likely truncated by max_tokens (stop_reason=${final.stop_reason}). Try a shorter request or fewer simultaneous edits.`,
-          });
-          continue;
-        }
-
-        sse(res, {
-          type: 'tool_call',
-          id:    block.id,
-          name:  block.name,
-          input,
-        });
+      } catch (e) {
+        if (debug) console.log(`[AI] finalMessage threw: ${e.message}`);
       }
 
       sse(res, { type: 'usage', tokensIn, tokensOut });
@@ -320,5 +329,32 @@ function attachCanvasImage(messages, canvasImage) {
   return out;
 }
 
+// Day 40 fix-6 — JSON parser for accumulated input_json_delta payloads.
+// Anthropic emits one or more `input_json_delta` fragments per tool
+// block. By the time content_block_stop fires they're meant to form a
+// complete JSON object. In rare cases the model still emits an empty
+// or trailing-comma form; we recover what we can.
+function parseToolInput(rawJson) {
+  if (!rawJson || typeof rawJson !== 'string') return {};
+  const trimmed = rawJson.trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { /* fall through */ }
+  // Best-effort recovery: trailing comma fix + dangling close brace.
+  for (const candidate of [
+    trimmed.replace(/,\s*$/, ''),
+    trimmed + '}',
+    trimmed.replace(/,\s*$/, '') + '}',
+  ]) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch { /* keep trying */ }
+  }
+  return {};
+}
+
 // Test-only exports
-module.exports._helpers = { attachCanvasImage, checkRateLimit, FREE_DAILY_LIMIT };
+module.exports._helpers = { attachCanvasImage, checkRateLimit, FREE_DAILY_LIMIT, parseToolInput };

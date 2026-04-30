@@ -69,6 +69,39 @@ test('routes/ai.js MAX_TOKENS.deep-think ≥ 8192 (Opus needs reasoning room)', 
   assert.ok(budget >= 8192, `MAX_TOKENS.deep-think=${budget}, need ≥ 8192`);
 });
 
+// ── Day 40 fix-6 — parseToolInput recovers from accumulated input_json_delta ─
+
+test('parseToolInput: complete JSON object → parsed', () => {
+  const { parseToolInput } = aiRoutes._helpers;
+  const out = parseToolInput('{"layer_id":"abc123","color":"#FF0000"}');
+  assert.deepEqual(out, { layer_id: 'abc123', color: '#FF0000' });
+});
+
+test('parseToolInput: empty / null / non-string → {}', () => {
+  const { parseToolInput } = aiRoutes._helpers;
+  assert.deepEqual(parseToolInput(''), {});
+  assert.deepEqual(parseToolInput(null), {});
+  assert.deepEqual(parseToolInput(undefined), {});
+  assert.deepEqual(parseToolInput(42), {});
+});
+
+test('parseToolInput: trailing comma recovered', () => {
+  const { parseToolInput } = aiRoutes._helpers;
+  const out = parseToolInput('{"layer_id":"abc","color":"#FF0000",');
+  assert.deepEqual(out, { layer_id: 'abc', color: '#FF0000' });
+});
+
+test('parseToolInput: missing close brace recovered', () => {
+  const { parseToolInput } = aiRoutes._helpers;
+  const out = parseToolInput('{"layer_id":"abc","color":"#FF0000"');
+  assert.deepEqual(out, { layer_id: 'abc', color: '#FF0000' });
+});
+
+test('parseToolInput: array → {} (we only accept objects for tool input)', () => {
+  const { parseToolInput } = aiRoutes._helpers;
+  assert.deepEqual(parseToolInput('[1,2,3]'), {});
+});
+
 test('getSystemPrompt: omits canvas block when context missing', () => {
   const prompt = getSystemPrompt('edit');
   assert.equal(prompt.includes('Current canvas:'), false);
