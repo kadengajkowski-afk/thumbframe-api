@@ -17,16 +17,19 @@ const { getSystemPrompt } = require('../lib/aiPrompts.js');
 const { computeCost, modelForIntent } = require('../lib/aiCost.js');
 
 const FREE_DAILY_LIMIT = 5;
-// Day 40 fix-4 — edit intent bumped from 512 → 2048 because tool-use
-// turns can run long: ~150 tok system prompt + the per-turn [CANVAS
-// STATE] block in the user message + the model's text reply + the
-// JSON-encoded tool_use input. At 512 the model was truncating mid-
-// tool-use (stop_reason='max_tokens'), leaving block.input as {}.
+// Day 40 fix-5 — edit bumped 2048 → 4096; deep-think 4096 → 8192.
+// Tool-use turns spend tokens on text reply + JSON-encoded tool_use
+// input AFTER the long system prompt + per-turn [CANVAS STATE] block.
+// Even at 2048 we still saw `stop_reason=tool_use` firing before the
+// tool args fully streamed, leaving block.input as {}. 4096 gives
+// the model meaningful headroom; deep-think doubles since users
+// explicitly opt into longer reasoning. classify stays tight at 32
+// since it's a single-label output.
 const MAX_TOKENS = {
   classify:      32,
-  edit:          2048,
+  edit:          4096,
   plan:          1024,
-  'deep-think':  4096,
+  'deep-think':  8192,
 };
 
 function setSseHeaders(res) {

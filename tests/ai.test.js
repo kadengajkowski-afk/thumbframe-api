@@ -47,18 +47,26 @@ test('getSystemPrompt: color rules still call out #RRGGBB hex format', () => {
 
 // ── Day 40 fix-4 — max_tokens budget ─────────────────────────────────────────
 
-test('routes/ai.js MAX_TOKENS.edit ≥ 2048 (room for tool_use after long prompt)', () => {
-  // Re-require to read the module's internal constant via grep — the
-  // route module doesn't export MAX_TOKENS, so we read the source. This
-  // is a regression guard: if someone shrinks the budget back below
-  // 2048, the model will start truncating mid-tool-use again.
+test('routes/ai.js MAX_TOKENS.edit ≥ 4096 (room for tool_use after long prompt)', () => {
+  // Day 40 fix-5 — regression guard. Tool-use turns truncated even at
+  // 2048 in real-world traffic; 4096 is the new floor.
   const fs = require('node:fs');
   const path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'ai.js'), 'utf8');
   const m = src.match(/edit:\s*(\d+)/);
   assert.ok(m, 'expected MAX_TOKENS.edit literal in routes/ai.js');
   const budget = Number(m[1]);
-  assert.ok(budget >= 2048, `MAX_TOKENS.edit=${budget}, need ≥ 2048 for tool-use turns`);
+  assert.ok(budget >= 4096, `MAX_TOKENS.edit=${budget}, need ≥ 4096 for tool-use turns`);
+});
+
+test('routes/ai.js MAX_TOKENS.deep-think ≥ 8192 (Opus needs reasoning room)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'routes', 'ai.js'), 'utf8');
+  const m = src.match(/'deep-think':\s*(\d+)/);
+  assert.ok(m, 'expected MAX_TOKENS.deep-think literal in routes/ai.js');
+  const budget = Number(m[1]);
+  assert.ok(budget >= 8192, `MAX_TOKENS.deep-think=${budget}, need ≥ 8192`);
 });
 
 test('getSystemPrompt: omits canvas block when context missing', () => {
