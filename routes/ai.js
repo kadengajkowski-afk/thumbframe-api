@@ -104,7 +104,7 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
 
   // POST /chat — SSE stream
   router.post('/chat', flexAuth, async (req, res) => {
-    const { messages, intent: rawIntent, canvasImage, tools, canvasState } = req.body || {};
+    const { messages, intent: rawIntent, canvasImage, tools, canvasState, crew_id } = req.body || {};
     const intent = ['classify', 'edit', 'plan', 'deep-think'].includes(rawIntent)
       ? rawIntent
       : 'edit';
@@ -132,7 +132,7 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
       : messages;
 
     const model = modelForIntent(intent);
-    const systemPrompt = getSystemPrompt(intent, { canvasState });
+    const systemPrompt = getSystemPrompt(intent, { canvasState, crewId: crew_id });
     const maxTokens = MAX_TOKENS[intent] || MAX_TOKENS.edit;
 
     setSseHeaders(res);
@@ -171,7 +171,7 @@ module.exports = function makeAiRoutes(supabase, anthropic, flexAuth) {
         const stateInfo = canvasState && canvasState.layers
           ? `layers=${canvasState.layers.length} focused=${canvasState.focused_layer_id ?? 'null'}`
           : 'no canvas_state';
-        console.log(`[AI] chat call: intent=${intent} model=${model} tools=${(streamArgs.tools || []).length} ${stateInfo}`);
+        console.log(`[AI] chat call: intent=${intent} model=${model} tools=${(streamArgs.tools || []).length} crew=${crew_id || 'captain'} ${stateInfo}`);
       }
 
       const stream = anthropic.messages.stream(streamArgs);

@@ -102,6 +102,64 @@ test('parseToolInput: array → {} (we only accept objects for tool input)', () 
   assert.deepEqual(parseToolInput('[1,2,3]'), {});
 });
 
+// ── Days 41-42 — Crew personality routing ────────────────────────────────────
+
+const { CREW_PROMPTS, DEFAULT_CREW_ID, getCrewPrompt } = require('../lib/crewPrompts.js');
+
+test('CREW_PROMPTS: ships exactly six personalities', () => {
+  const ids = Object.keys(CREW_PROMPTS).sort();
+  assert.deepEqual(
+    ids,
+    ['captain', 'cook', 'doctor', 'first-mate', 'lookout', 'navigator'],
+  );
+});
+
+test('DEFAULT_CREW_ID is captain', () => {
+  assert.equal(DEFAULT_CREW_ID, 'captain');
+});
+
+test('every crew prompt forbids the banned phrases', () => {
+  for (const [id, prompt] of Object.entries(CREW_PROMPTS)) {
+    for (const banned of ['oops', 'sorry', 'welcome back', 'AI-powered']) {
+      assert.ok(prompt.includes(banned), `${id} prompt missing ban on "${banned}"`);
+    }
+  }
+});
+
+test('First Mate prompt explicitly tells the AI to flex specialties', () => {
+  const fm = CREW_PROMPTS['first-mate'];
+  assert.ok(/flex/i.test(fm), 'first-mate prompt should call out flexing');
+  for (const archetype of ['Captain', 'Cook', 'Navigator', 'Doctor', 'Lookout']) {
+    assert.ok(fm.includes(archetype), `first-mate prompt missing reference to ${archetype}`);
+  }
+});
+
+test('getCrewPrompt: known id returns its prompt; unknown falls back to Captain', () => {
+  assert.equal(getCrewPrompt('cook'), CREW_PROMPTS.cook);
+  assert.equal(getCrewPrompt('bogus'), CREW_PROMPTS.captain);
+  assert.equal(getCrewPrompt(undefined), CREW_PROMPTS.captain);
+  assert.equal(getCrewPrompt(null), CREW_PROMPTS.captain);
+});
+
+test('getSystemPrompt: prepends the crew block before the intent rules', () => {
+  // Cook prompt + edit-intent rules.
+  const cook = getSystemPrompt('edit', { crewId: 'cook' });
+  assert.ok(cook.startsWith(CREW_PROMPTS.cook), 'crew block must lead');
+  assert.ok(cook.includes('TOOL USAGE'), 'edit rules must follow');
+
+  // Default falls back to Captain when crew_id is missing.
+  const fallback = getSystemPrompt('edit', {});
+  assert.ok(fallback.startsWith(CREW_PROMPTS.captain));
+});
+
+test('getSystemPrompt: distinct crew_ids produce distinct system prompts', () => {
+  const captain = getSystemPrompt('edit', { crewId: 'captain' });
+  const navigator = getSystemPrompt('edit', { crewId: 'navigator' });
+  assert.notEqual(captain, navigator);
+  assert.ok(captain.includes('Captain'));
+  assert.ok(navigator.includes('Navigator'));
+});
+
 test('getSystemPrompt: omits canvas block when context missing', () => {
   const prompt = getSystemPrompt('edit');
   assert.equal(prompt.includes('Current canvas:'), false);
@@ -205,7 +263,10 @@ test('getSystemPrompt: deep-think returns the deep-think prompt', () => {
 });
 
 test('getSystemPrompt: unknown intent falls back to edit', () => {
-  assert.equal(getSystemPrompt('bogus'), _INTENT_PROMPTS.edit);
+  // Days 41-42 — output now carries the Captain crew prefix; the
+  // intent body still falls back to edit when the intent is unknown.
+  const prompt = getSystemPrompt('bogus');
+  assert.ok(prompt.includes(_INTENT_PROMPTS.edit));
 });
 
 test('Voice: every prompt includes the BASE_VOICE rules', () => {
