@@ -15,8 +15,38 @@ test('getSystemPrompt: appends Current canvas block when canvasState provided', 
   const prompt = getSystemPrompt('edit', {
     canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: 'L1', layers: [] },
   });
-  assert.ok(prompt.includes('Current canvas:'));
+  assert.ok(prompt.includes('Current canvas (full JSON):'));
   assert.ok(prompt.includes('"focused_layer_id": "L1"'));
+});
+
+test('getSystemPrompt: lists valid layer_ids verbatim when layers exist', () => {
+  const prompt = getSystemPrompt('edit', {
+    canvasState: {
+      canvas: { width: 1280, height: 720 },
+      focused_layer_id: 'V1bL3xyz',
+      layers: [
+        { id: 'V1bL3xyz', type: 'rect', name: 'Rect ca4w', x: 0, y: 0, width: 200, height: 100, opacity: 1 },
+      ],
+    },
+  });
+  // Layer-id list block must appear and carry the exact id string.
+  assert.ok(prompt.includes('Valid layer_ids'));
+  assert.ok(prompt.includes('"V1bL3xyz"'));
+  // Focused-layer hint must reference the same id, not the name.
+  assert.ok(prompt.includes('Focused layer'));
+  assert.ok(/Focused layer.*"V1bL3xyz"/.test(prompt));
+});
+
+test('getSystemPrompt: tells the model to refuse layer tools on empty canvas', () => {
+  const prompt = getSystemPrompt('edit', {
+    canvasState: { canvas: { width: 1280, height: 720 }, focused_layer_id: null, layers: [] },
+  });
+  assert.ok(/no layers/i.test(prompt));
+});
+
+test('getSystemPrompt: layer_id rules call out "do NOT invent"', () => {
+  const prompt = getSystemPrompt('edit');
+  assert.ok(/do NOT invent/i.test(prompt));
 });
 
 test('getSystemPrompt: omits canvas block when context missing', () => {
